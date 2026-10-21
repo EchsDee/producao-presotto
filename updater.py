@@ -17,7 +17,7 @@ PERMISSIONS = {
     'manage_update_settings': 'Configurar atualizações', 'view_update_history': 'Visualizar histórico de atualizações',
 }
 LIMIT = 64 * 1024 * 1024
-DEFAULT_REPOSITORY = {'owner': 'EchsDee', 'repository': 'producao-pressotto', 'channel': 'stable', 'version': 0}
+DEFAULT_REPOSITORY = {'owner': 'EchsDee', 'repository': 'producao-presotto', 'channel': 'stable', 'version': 0}
 
 
 def github_token(directory):
@@ -108,7 +108,7 @@ class Redirect(urllib.request.HTTPRedirectHandler):
 
 def github(path, token='', binary=False):
     headers = {'Accept': 'application/octet-stream' if binary else 'application/vnd.github+json',
-               'User-Agent': 'Producao-Pressotto-Updater', 'X-GitHub-Api-Version': '2022-11-28'}
+               'User-Agent': 'Producao-Presotto-Updater', 'X-GitHub-Api-Version': '2022-11-28'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     try:
@@ -184,7 +184,7 @@ def register(app, need, body, audit):
         g.db.execute("INSERT INTO metadata VALUES('updates',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(value),))
 
     def event(action, data):
-        audit('update.' + action, 'application', 'updates', 'Produção Pressotto', new=data)
+        audit('update.' + action, 'application', 'updates', 'Produção Presotto', new=data)
 
     def admin(permission):
         need(permission)
@@ -283,7 +283,7 @@ def register(app, need, body, audit):
                 release = max(candidates, key=lambda x: x[0])[1] if candidates else None
                 value = {'checked_at': time.time(), 'status': 'available' if release and version(release['tag_name']) > version(installed) else 'current', 'release': None}
                 if release:
-                    asset = next((a for a in release.get('assets', []) if a['name'] == 'pressotto-update.zip' and re.fullmatch(r'sha256:[a-f0-9]{64}', a.get('digest') or '')), None)
+                    asset = next((a for a in release.get('assets', []) if a['name'] == 'presotto-update.zip' and re.fullmatch(r'sha256:[a-f0-9]{64}', a.get('digest') or '')), None)
                     value['release'] = {'version': release['tag_name'].removeprefix('v'), 'notes': (release.get('body') or '')[:20000], 'published_at': release.get('published_at'), 'asset_id': asset['id'] if asset else None, 'digest': asset['digest'] if asset else None, 'size': asset['size'] if asset else None, 'repository': config['owner'] + '/' + config['repository']}
                 atomic(directory / 'state.json', value)
                 event('checked', {'current': installed, 'latest': value['release']['version'] if release else None})

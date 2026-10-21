@@ -1,6 +1,6 @@
-# Produção Pressotto
+# Produção Presotto
 
-Plataforma Kanban compartilhada, com identidade visual da Pressotto e interface em português brasileiro. O aplicativo mantém Flask, SQLite, autenticação, permissões e todos os recursos existentes. O tema usa azul-marinho `#08073f`, amarelo `#e4c204` e superfícies claras.
+Plataforma Kanban compartilhada, com identidade visual da Presotto e interface em português brasileiro. O aplicativo mantém Flask, SQLite, autenticação, permissões e todos os recursos existentes. O tema usa azul-marinho `#08073f`, amarelo `#e4c204` e superfícies claras.
 
 ## Iniciar no Windows
 
@@ -16,7 +16,7 @@ Acesse **http://127.0.0.1:8000**. Abra o endereço do servidor, em vez de abrir 
 
 ## Atualizações pelo GitHub
 
-Em **Administração → Atualizações do aplicativo**, configure o proprietário, o repositório e o canal (estável ou pré-lançamentos). O padrão é **EchsDee/producao-pressotto**, canal estável. Configurações já salvas por um administrador têm prioridade sobre esse padrão. A versão instalada é lida de `VERSION`. O painel permite consultar versões, ler notas, baixar o pacote validado, autorizar sua instalação e consultar o histórico. Nada é instalado automaticamente.
+Em **Configurações → Atualizações do aplicativo**, configure o proprietário, o repositório e o canal (estável ou pré-lançamentos). O padrão é **EchsDee/producao-presotto**, canal estável. Configurações já salvas por um administrador têm prioridade sobre esse padrão. A versão instalada é lida de `VERSION`. O painel permite consultar versões, ler notas, baixar o pacote validado, autorizar sua instalação e consultar o histórico. Nada é instalado automaticamente.
 
 Execute `launcher.py` para habilitar instalações. O comando antigo `python app.py` continua funcionando para desenvolvimento, com consulta e download disponíveis; a instalação fica bloqueada nesse modo. Mantenha uma única instância do supervisor por banco e porta. Não inicie simultaneamente um segundo servidor apontando para o mesmo banco durante uma atualização. Em produção, configure seu gerenciador de serviços para executar e reiniciar **launcher.py**, mantendo o mesmo usuário do sistema e as mesmas variáveis de ambiente.
 
@@ -29,11 +29,11 @@ Neste computador, `data/updates/auth.json` contém somente `{"source":"github_cl
 ### Publicar uma versão compatível
 
 1. Atualize `VERSION` com uma versão semântica, por exemplo `1.0.1`. Preserve as migrações existentes byte a byte; adicione novas migrações numeradas em sequência. Teste-as com uma cópia do banco existente e mantenha o protocolo do supervisor compatível.
-2. Execute `.venv/Scripts/python.exe build_release.py pressotto-update.zip` na pasta `kanban`. O pacote contém somente código permitido, arquivos de interface, migrações, `VERSION`, `requirements.txt` e manifesto de hashes. Banco, anexos, fotos, `.env`, credenciais e ambiente virtual são excluídos.
-3. Crie uma **Release** no repositório configurado, com tag correspondente (`v1.0.1`), notas e o arquivo **pressotto-update.zip** como asset. Não use o ZIP de código-fonte gerado automaticamente pelo GitHub. Para pré-lançamentos, marque a Release e use uma versão como `1.1.0-beta.1`.
+2. Execute `.venv/Scripts/python.exe build_release.py presotto-update.zip` na pasta `kanban`. O pacote contém somente código permitido, arquivos de interface, migrações, `VERSION`, `requirements.txt` e manifesto de hashes. Banco, anexos, fotos, `.env`, credenciais e ambiente virtual são excluídos.
+3. Crie uma **Release** no repositório configurado, com tag correspondente (`v1.0.1`), notas e o arquivo **presotto-update.zip** como asset. Não use o ZIP de código-fonte gerado automaticamente pelo GitHub. Para pré-lançamentos, marque a Release e use uma versão como `1.1.0-beta.1`.
 4. O pacote precisa ter o `digest` SHA-256 fornecido pela [API de assets do GitHub](https://docs.github.com/en/rest/releases/assets). Downloads sem esse digest são recusados. O download usa exclusivamente o asset do repositório configurado; tamanho, digest, manifesto, caminhos e hashes internos são verificados antes de preparar a versão.
 
-O workflow `.github/workflows/release.yml` automatiza o empacotamento e a publicação ao enviar uma tag `vX.Y.Z`. Ele verifica se a tag corresponde a `VERSION`, publica `pressotto-update.zip` e marca tags com sufixo como pré-lançamento. Para publicar a próxima versão, altere `VERSION`, faça commit, crie a tag correspondente e envie a branch e a tag para o GitHub. O arquivo `.gitattributes` mantém as quebras de linha iguais no Windows e no Linux para preservar os hashes e a compatibilidade dos pacotes.
+O workflow `.github/workflows/release.yml` automatiza o empacotamento e a publicação ao enviar uma tag `vX.Y.Z`. Ele verifica se a tag corresponde a `VERSION`, publica `presotto-update.zip` e marca tags com sufixo como pré-lançamento. Para publicar a próxima versão, altere `VERSION`, faça commit, crie a tag correspondente e envie a branch e a tag para o GitHub. O arquivo `.gitattributes` mantém as quebras de linha iguais no Windows e no Linux para preservar os hashes e a compatibilidade dos pacotes.
 
 O protocolo inicial aceita pacotes de até 64 MB comprimidos/descomprimidos e exige **requirements.txt idêntico ao instalado**. Versões que alteram dependências exigem atualização assistida do ambiente pelo operador; o painel informa a incompatibilidade e não executa `pip`, scripts de instalação ou comandos enviados pelo navegador. A consulta considera as primeiras 100 Releases publicadas, escolhendo a maior versão semântica elegível no canal. O campo `minimum_version` do manifesto permite exigir uma versão intermediária.
 
@@ -63,20 +63,20 @@ Em um banco ainda não inicializado, o primeiro acesso é **Monke / monkeman**, 
 
 ## Interface e identidade visual
 
-- Cabeçalho azul-marinho com logotipo local da Pressotto e ações principais em amarelo.
+- Cabeçalho azul-marinho com logotipo local da Presotto e ações principais em amarelo.
 - Quadros, cartões, filtros, formulários, administração e registro de atividades em português.
 - Perfis exibidos como Administrador, Gestor, Membro e Leitor; os identificadores internos permanecem iguais para compatibilidade.
 - Datas e números formatados em `pt-BR`, respeitando o fuso horário do navegador.
 - Permissões agrupadas por área para facilitar a configuração.
 - Layout responsivo, foco visível e suporte à preferência por movimento reduzido.
 
-O logotipo está em `dist/assets/pressotto-logo.png`, obtido do [arquivo oficial da Pressotto](https://pressotto.com/wp-content/uploads/2024/08/LOGO-PRESSOTTO-AMARELO-1-3.png). Ele é servido localmente: o aplicativo não depende do site da empresa para carregar a marca. O tema fica em `dist/theme.css`. Não há etapa de compilação nem dependências visuais externas.
+O logotipo adaptado para Presotto fica em `dist/assets/presotto-logo.png` e é servido localmente. O tema fica em `dist/theme.css`. Não há etapa de compilação nem dependências visuais externas.
 
 A tradução não reescreve nomes, descrições, arquivos ou registros históricos cadastrados pelos usuários. Rótulos padrão da versão anterior são apresentados em português; suas informações originais continuam no banco.
 
 ## Armazenamento e alterações simultâneas
 
-Em **Administração → Aparência**, administradores podem alterar as cores do cabeçalho, dos botões e do fundo. A escolha mostra uma prévia local; **Salvar cores** aplica o tema a todos os usuários e à tela de login. É possível cancelar a prévia ou restaurar as cores da Pressotto antes de salvar. O texto dos botões e do cabeçalho ajusta seu contraste. O tema é armazenado na tabela `metadata`, com controle de versão e registro de atividade. A autorização é verificada no backend; delegar gerenciamento de usuários não concede acesso à alteração das cores.
+Em **Configurações → Aparência**, administradores podem alterar as cores do cabeçalho, dos botões e do fundo. A escolha mostra uma prévia local; **Salvar cores** aplica o tema a todos os usuários e à tela de login. É possível cancelar a prévia ou restaurar as cores da Presotto antes de salvar. O texto dos botões e do cabeçalho ajusta seu contraste. O tema é armazenado na tabela `metadata`, com controle de versão e registro de atividade. A autorização é verificada no backend; delegar gerenciamento de usuários não concede acesso à alteração das cores.
 
 O banco padrão é `data/kanban.sqlite3`, relativo à pasta de `app.py`. Ele armazena quadros, colunas, tarefas, posições, responsáveis, contas, permissões, sessões, atividades e anexos. Os arquivos são BLOBs do SQLite; não existe pasta pública de uploads.
 

@@ -1,4 +1,4 @@
-"""Produção Pressotto: same-origin Flask API, SQLite persistence, server-side sessions."""
+"""Produção Presotto: same-origin Flask API, SQLite persistence, server-side sessions."""
 from __future__ import annotations
 
 import hashlib
@@ -467,9 +467,9 @@ def create_app(config=None):
                   previous=previous['colors'], new=colors)
         return jsonify(theme=theme)
 
-    @app.get('/assets/pressotto-logo.png')
+    @app.get('/assets/presotto-logo.png')
     def brand_logo():
-        return send_from_directory(ROOT / 'dist' / 'assets', 'pressotto-logo.png')
+        return send_from_directory(ROOT / 'dist' / 'assets', 'presotto-logo.png')
 
     def new_session(user_id):
         db().execute('DELETE FROM sessions WHERE expires_at<=?', (int(time.time()),))
@@ -1267,6 +1267,6 @@ if __name__ == '__main__':
     application = create_app()
     host = os.environ.get('KANBAN_HOST', '127.0.0.1')
     port = int(os.environ.get('KANBAN_PORT', '8000'))
-    print(f'Produção Pressotto: http://{host}:{port}', flush=True)
+    print(f'Produção Presotto: http://{host}:{port}', flush=True)
     serve(application, host=host, port=port, threads=8,
           max_request_body_size=application.config['MAX_CONTENT_LENGTH'])

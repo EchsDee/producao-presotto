@@ -1,6 +1,7 @@
 'use strict';
 let updateInfo = null, updateWatching = false;
 function hasUpdateAccess() { return ['view_update_status','check_updates','download_updates','install_updates','manage_update_settings','view_update_history'].some(can); }
+function hasConfigurationAccess() { return user?.role === 'Administrator' || hasUpdateAccess(); }
 async function loadUpdates() {
   $('#updates-panel').hidden = !hasUpdateAccess();
   if (!hasUpdateAccess()) return;
@@ -242,7 +243,7 @@ function showLogin() {
   if (savedTheme) applyTheme(savedTheme.colors);
   user = null; csrf = ''; board = null; boards = []; people = []; users = [];
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
-  for (const id of ['workspace', 'admin', 'activity-screen', 'password-screen', 'account']) $('#' + id).hidden = true;
+  for (const id of ['workspace', 'admin', 'configuration-screen', 'activity-screen', 'password-screen', 'account']) $('#' + id).hidden = true;
   $('#activity-list').replaceChildren(); $('#task-history').replaceChildren(); $('#standalone-history').replaceChildren();
   $('.board').replaceChildren(); $('#users-list').replaceChildren();
   $('#login-screen').hidden = false;
@@ -250,7 +251,7 @@ function showLogin() {
 }
 function showPassword() {
   if (savedTheme) applyTheme(savedTheme.colors);
-  $('#workspace').hidden = $('#admin').hidden = $('#activity-screen').hidden = true;
+  $('#workspace').hidden = $('#configuration-screen').hidden = $('#admin').hidden = $('#activity-screen').hidden = true;
   $('#password-screen').hidden = false;
   $('#password-cancel').hidden = user.must_change_password;
   $('#password-hint').textContent = user.must_change_password
@@ -263,7 +264,8 @@ async function signedIn(result) {
   $('#login-screen').hidden = true; $('#account').hidden = false;
   renderIdentity();
   $('#board-menu').hidden = !can('view_boards') || user.must_change_password;
-  $('#settings').hidden = !can('manage_users') && !can('manage_permissions') && !hasUpdateAccess();
+  $('#settings').hidden = (!can('manage_users') && !can('manage_permissions')) || user.must_change_password;
+  $('#configuration-menu').hidden = !hasConfigurationAccess() || user.must_change_password;
   $('#activity-menu').hidden = !can('view_activity_log') || user.must_change_password;
   if (user.must_change_password) { showPassword(); return; }
   $('#password-screen').hidden = true;
@@ -271,8 +273,9 @@ async function signedIn(result) {
   $('#files').accept = config.extensions.map(ext => '.' + ext).join(',');
   if (can('view_boards')) await loadWorkspace();
   else {
-    $('#workspace').hidden = $('#admin').hidden = true;
-    if (can('manage_users') || can('manage_permissions') || hasUpdateAccess()) await showAdmin();
+    $('#workspace').hidden = $('#configuration-screen').hidden = $('#admin').hidden = true;
+    if (can('manage_users') || can('manage_permissions')) await showAdmin();
+    else if (hasConfigurationAccess()) await showConfiguration();
     else if (can('view_activity_log')) await showActivity();
     else message("Sua conta não tem acesso aos quadros. Solicite a liberação a um administrador.");
   }
@@ -285,7 +288,7 @@ async function loadWorkspace(preferred) {
   boards = list.boards; people = directory.users;
   const id = boards.find(b => b.id === (preferred || board?.id))?.id || boards[0]?.id;
   board = id ? (await api('/boards/' + id)).board : null;
-  $('#workspace').hidden = false; $('#admin').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true;
+  $('#workspace').hidden = false; $('#admin').hidden = $('#configuration-screen').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true;
   $('#new').hidden = !can('create_tasks');
   $('#new-column').hidden = !can('manage_columns');
   for (const name of ['new-board', 'rename-board', 'delete-board']) $('#' + name).hidden = !can('manage_boards');
@@ -538,13 +541,11 @@ function openBoard(rename = false) {
   $('#board-name').value = rename ? board.name : ''; $('#board-dialog').showModal();
 }
 async function showAdmin() {
-  savedTheme = (await api('/theme')).theme;
-  applyTheme(savedTheme.colors); themeFields(savedTheme.colors);
-  $('#appearance').hidden = user.role !== 'Administrator';
-  $('#theme-status').textContent = '';
-  users = can('manage_users') || can('manage_permissions') ? (await api('/users')).users : [];
-  await loadUpdates();
-  $('#workspace').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true; $('#admin').hidden = false;
+  if (!can('manage_users') && !can('manage_permissions')) throw new Error('Você não tem acesso à administração.');
+  if (savedTheme) applyTheme(savedTheme.colors);
+  users = (await api('/users')).users;
+  $('#workspace').hidden = $('#configuration-screen').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true; $('#admin').hidden = false;
+  $('#back-board').hidden = !can('view_boards');
   $('#new-user').hidden = !can('manage_users');
   const list = $('#users-list'); list.replaceChildren();
   for (const account of users) {
@@ -555,6 +556,17 @@ async function showAdmin() {
     identity.append(text); row.append(identity, button(account.id === user.id ? "Ver conta" : "Gerenciar", () => openUser(account)));
     list.append(row);
   }
+}
+async function showConfiguration() {
+  if (!hasConfigurationAccess()) throw new Error('Você não tem acesso às configurações.');
+  savedTheme = (await api('/theme')).theme;
+  applyTheme(savedTheme.colors); themeFields(savedTheme.colors);
+  $('#appearance').hidden = user.role !== 'Administrator';
+  $('#theme-status').textContent = '';
+  await loadUpdates();
+  $('#workspace').hidden = $('#admin').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true;
+  $('#configuration-screen').hidden = false;
+  $('#configuration-back').hidden = !can('view_boards');
 }
 function drawPermissions(role, overrides = {}) {
   const list = $('#permissions'); list.replaceChildren();
@@ -654,7 +666,7 @@ async function loadHistory(taskId, target, append = false) {
 async function showActivity() {
   if (savedTheme) applyTheme(savedTheme.colors);
   const filters = await api('/activity/options');
-  $('#workspace').hidden = $('#admin').hidden = $('#password-screen').hidden = true;
+  $('#workspace').hidden = $('#configuration-screen').hidden = $('#admin').hidden = $('#password-screen').hidden = true;
   $('#activity-screen').hidden = false;
   options($('#activity-user'), [['', "Todos os usuários"], ...filters.actors.map(a => [a.id, a.name])], $('#activity-user').value || '');
   options($('#activity-task'), [['', "Todas as tarefas"], ...filters.tasks.map(t => [t.id, t.name + ' · ' + t.id.slice(0, 8)])], $('#activity-task').value || '');
@@ -752,6 +764,8 @@ $('#password-form').onsubmit = event => { event.preventDefault(); run(async () =
 }); };
 $('#board-menu').onclick = () => run(() => loadWorkspace());
 $('#settings').onclick = () => run(showAdmin);
+$('#configuration-menu').onclick = () => run(showConfiguration);
+$('#configuration-back').onclick = () => run(() => loadWorkspace());
 for (const key of Object.keys(THEME_DEFAULTS)) $('#theme-'+key).oninput = previewTheme;
 $('#theme-reset').onclick = () => { themeFields(THEME_DEFAULTS); previewTheme(); };
 $('#theme-cancel').onclick = () => { themeFields(savedTheme.colors); applyTheme(savedTheme.colors); $('#theme-status').textContent=''; };

@@ -4,5 +4,5 @@ __pycache__/
 data/
 .env
 .pytest_cache/
-pressotto-update.zip
+presotto-update.zip
 .openai/

@@ -25,4 +25,4 @@ def build(source, output, minimum='1.0.0'):
 
 
 if __name__ == '__main__':
-    build(Path(__file__).resolve().parent, sys.argv[1] if len(sys.argv) > 1 else 'pressotto-update.zip')
+    build(Path(__file__).resolve().parent, sys.argv[1] if len(sys.argv) > 1 else 'presotto-update.zip')

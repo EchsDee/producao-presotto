@@ -22,7 +22,7 @@ jobs:
           from pathlib import Path
           assert os.environ['RELEASE_TAG'] == 'v' + Path('VERSION').read_text().strip(), 'A tag deve corresponder a VERSION'
           PY
-          python build_release.py pressotto-update.zip
+          python build_release.py presotto-update.zip
       - name: Publicar Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,4 +30,4 @@ jobs:
         run: |
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" pressotto-update.zip --verify-tag --generate-notes "${flags[@]}"
+          gh release create "$RELEASE_TAG" presotto-update.zip --verify-tag --generate-notes "${flags[@]}"

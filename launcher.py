@@ -78,7 +78,7 @@ def record(directory, database, job, status, message):
     atomic(directory / 'history.json', history)
     with closing(sqlite3.connect(database, timeout=20)) as db, db:
         db.execute('INSERT INTO activity_log(occurred_at,actor_id,actor_name,action,entity_type,entity_id,entity_name,previous_values,new_values) VALUES(?,?,?,?,?,?,?,?,?)',
-                   (item['finished_at'], job['actor_id'], job['actor_name'], 'update.' + status, 'application', 'updates', 'Produção Pressotto', json.dumps({'version': job['from']}), json.dumps({'version': job['to'], 'result': message})))
+                   (item['finished_at'], job['actor_id'], job['actor_name'], 'update.' + status, 'application', 'updates', 'Produção Presotto', json.dumps({'version': job['from']}), json.dumps({'version': job['to'], 'result': message})))
 
 
 def supervise():
@@ -166,7 +166,7 @@ def supervise():
                 atomic(directory / 'progress.json', {'status': 'failed', 'percent': 100})
         else:
             start(Path(read(directory / 'active.json', {'path': str(ROOT)})['path']))
-        print(f'Produção Pressotto: {base} (atualizações habilitadas)', flush=True)
+        print(f'Produção Presotto: {base} (atualizações habilitadas)', flush=True)
         try:
             while True:
                 job = read(directory / 'job.json')

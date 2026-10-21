@@ -25,7 +25,7 @@ class UpdateTests(unittest.TestCase):
         return Path(self.path).parent / 'updates'
 
     def configure(self):
-        result = self.request('PATCH', '/api/updates/settings', {'version':0, 'owner':'pressotto', 'repository':'kanban', 'channel':'stable'})
+        result = self.request('PATCH', '/api/updates/settings', {'version':0, 'owner':'presotto', 'repository':'kanban', 'channel':'stable'})
         self.assertEqual(result.status_code, 200, result.json)
 
     def bundle(self, broken=False):
@@ -42,7 +42,7 @@ class UpdateTests(unittest.TestCase):
 
     def release(self, raw):
         return {'tag_name':'v1.0.1','draft':False,'prerelease':False,'body':'Notas <script>alert(1)</script>',
-                'published_at':'2026-10-21T12:00:00Z', 'assets':[{'id':123,'name':'pressotto-update.zip',
+                'published_at':'2026-10-21T12:00:00Z', 'assets':[{'id':123,'name':'presotto-update.zip',
                 'digest':'sha256:'+hashlib.sha256(raw).hexdigest(),'size':len(raw)}]}
 
     def download(self, raw):
@@ -60,7 +60,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_default_repository_and_opt_in_cli_credential(self):
         settings=self.client.get('/api/updates').json['settings']
-        self.assertEqual((settings['owner'],settings['repository']),('EchsDee','producao-pressotto'))
+        self.assertEqual((settings['owner'],settings['repository']),('EchsDee','producao-presotto'))
         import subprocess
         with patch.dict(os.environ,{'KANBAN_GITHUB_TOKEN':''}):
             with patch('subprocess.run') as run:

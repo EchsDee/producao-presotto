@@ -67,6 +67,9 @@ def main():
             expect(page.locator('.log-entry pre').first).to_contain_text('Antes')
             page.screenshot(path=str(output/'atividades-desktop.png'), full_page=True)
             page.locator('#settings').click()
+            expect(page.locator('#configuration-screen')).to_be_hidden()
+            expect(page.locator('#appearance')).to_be_hidden()
+            expect(page.locator('#updates-panel')).to_be_hidden()
             page.locator('.user-row').filter(has_text='Mariana').get_by_role('button',name='Gerenciar').click()
             expect(page.locator('#user-role')).to_have_value('Member')
             expect(page.locator('#user-role option:checked')).to_have_text('Membro')
@@ -82,7 +85,10 @@ def main():
             expect(page.locator('#task-history')).to_contain_text('criou a tarefa')
             assert page.locator('#dialog').evaluate('(e)=>e.scrollWidth<=e.clientWidth')
             page.locator('#cancel').click()
-            page.locator('#settings').click()
+            page.locator('#configuration-menu').click()
+            expect(page.locator('#configuration-screen')).to_be_visible()
+            expect(page.locator('#admin')).to_be_hidden()
+            expect(page.locator('#users-list')).to_be_hidden()
             expect(page.locator('#appearance')).to_be_visible()
             page.locator('#theme-navy').evaluate("e=>{e.value='#252558';e.dispatchEvent(new Event('input',{bubbles:true}))}")
             assert page.locator('.topbar').evaluate('(e)=>getComputedStyle(e).backgroundColor') == 'rgb(37, 37, 88)'
@@ -94,7 +100,7 @@ def main():
             assert page.locator('.topbar').evaluate('(e)=>getComputedStyle(e).backgroundColor') == 'rgb(37, 37, 88)'
             assert not errors, errors
             browser.close()
-        print('PASS: tema Pressotto, logotipo local, pt-BR, perfis/permissões traduzidos, histórico, desktop e celular')
+        print('PASS: tema Presotto, logotipo local, pt-BR, perfis/permissões traduzidos, histórico, desktop e celular')
         print('Previews: '+str(output))
     finally:
         if server:
