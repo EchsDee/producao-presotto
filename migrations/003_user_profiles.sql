@@ -1,0 +1,5 @@
+ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN avatar BLOB;
+ALTER TABLE users ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN profile_version INTEGER NOT NULL DEFAULT 0;
+UPDATE users SET display_name=username;

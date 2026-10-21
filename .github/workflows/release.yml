@@ -1,0 +1,33 @@
+name: Publicar atualização
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validar tag e gerar pacote
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          assert os.environ['RELEASE_TAG'] == 'v' + Path('VERSION').read_text().strip(), 'A tag deve corresponder a VERSION'
+          PY
+          python build_release.py pressotto-update.zip
+      - name: Publicar Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" pressotto-update.zip --verify-tag --generate-notes "${flags[@]}"
