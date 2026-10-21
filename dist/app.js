@@ -53,7 +53,7 @@ async function watchUpdate() {
         if(['installed','failed'].includes(progress.status)) {
           location.reload(); return;
         }
-      } catch (_) { /* Expected downtime during restart. */ }
+      } catch (_) {  }
     }
     message('O servidor ainda não respondeu. Verifique o serviço e o histórico de atualização.',true);
   } finally { updateWatching=false; }
@@ -151,7 +151,7 @@ const priorityLabel = value => ({normal: 'Normal', high: 'Alta', low: 'Baixa'}[v
 const displayName = value => ({'My board': 'Meu quadro', 'To do': 'A fazer', 'In progress': 'Em andamento',
   Done: 'Concluído', 'Imported browser board': 'Quadro importado do navegador'}[value] || value);
 function activityValues(value, field = '') {
-  const labels = {title:'Título',description:'Descrição',priority:'Prioridade',column_id:'ID da coluna',column_name:'Coluna',
+  const labels = {tags:'Tags',task_date:'Data',desired_delivery:'Entrega desejada',title:'Título',description:'Descrição',priority:'Prioridade',column_id:'ID da coluna',column_name:'Coluna',
     position:'Posição',name:'Nome',type:'Tipo',username:'Usuário',user_id:'ID do usuário',role:'Perfil',overrides:'Permissões individuais',
     effective:'Permissões efetivas',enabled:'Conta ativa',filename:'Nome do arquivo',format:'Formato',size:'Tamanho (bytes)',sha256:'SHA-256',
     uploaded_by:'ID de quem enviou',uploaded_at:'Data de envio',uploader:'Enviado por',reason:'Motivo',source:'Origem',
@@ -227,7 +227,6 @@ async function run(action) {
   try { await action(); }
   catch (error) {
     message(error.message + (error.status === 409 ? " Seu rascunho foi mantido. Feche esta janela e atualize o quadro antes de tentar novamente." : ''), true);
-    // Errors must be visible even while a modal dialog is open.
     const dialog = document.querySelector('dialog[open]');
     if (dialog) {
       let feedback = dialog.querySelector('.dialog-feedback');
@@ -315,7 +314,7 @@ function render() {
     const col = el('section', 'column'); col.dataset.type = column.type;
     col.setAttribute('aria-label', displayName(column.name));
     const list = board.tasks.filter(t => t.column_id === column.id &&
-      (t.title + ' ' + t.description).toLowerCase().includes(query) &&
+      (t.title + ' ' + t.description + ' ' + (t.tags || []).join(' ')).toLowerCase().includes(query) &&
       (!onlyMine || t.assigned_to_me) && (!selectedAssignee || t.assignees.includes(selectedAssignee)));
     const head = el('div', 'column-head'), heading = el('span', '', displayName(column.name));
     heading.append(el('span', 'type-label', {todo: "Início", doing: "Em andamento", done: "Concluído"}[column.type]));
@@ -356,11 +355,18 @@ function render() {
           if (taskId && taskId !== task.id) run(() => moveTask(taskId, column.id, task.id));
         };
       }
-      card.append(el('span', 'tag ' + task.priority, priorityLabel(task.priority)));
       const title = button(task.title, () => openTask(task), 'icon task-title');
       
       const h3 = el('h3'); h3.append(title); card.append(h3);
       if (task.description) card.append(el('p', '', task.description));
+      if(task.tags?.length) {
+        const tags=el('div','task-tags');
+        for(const tag of task.tags) tags.append(el('span','task-tag',tag));
+        card.append(tags);
+      }
+      for (const [field,label] of [['task_date','Data'],['desired_delivery','Entrega desejada']]) {
+        if(task[field]) card.append(el('div','task-date',label+': '+task[field].split('-').reverse().join('/')));
+      }
       if (can('view_task_assignees') && task.assignees.length) {
         const identities = el('div','card-identities'); identities.append(avatarStack(task.assignees)); card.append(identities);
       }
@@ -402,13 +408,15 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   cleanDialog($('#dialog'));
   $('#form-title').textContent = task ? "Detalhes da tarefa" : "Nova tarefa";
   $('#title').value = task?.title || ''; $('#description').value = task?.description || '';
-  $('#priority').value = task?.priority || 'normal';
+  const today = new Date();
+  $('#task-date').value = task ? task.task_date || '' : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+  $('#desired-delivery').value = task?.desired_delivery || '';
+  $('#task-tags').value = (task?.tags || []).join(', ');
   options($('#status'), board.columns.map(c => [c.id, displayName(c.name)]), task?.column_id || status);
-  // Existing task movement is a separate action, avoiding partial edit + movement saves.
   $('#status').disabled = !!task || !can('create_tasks');
   syncAssignments(task);
   const editable = task ? can('edit_tasks') : can('create_tasks');
-  for (const id of ['title', 'description', 'priority']) $('#' + id).disabled = !editable;
+  for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'task-tags']) $('#' + id).disabled = !editable;
   $('#save-task').hidden = !editable;
   savedTaskFields = JSON.stringify(taskFields());
   $('#files').value = ''; $('#files-status').textContent = 'Nenhum arquivo selecionado';
@@ -419,7 +427,7 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   else if (can('view_task_history')) $('#task-history').append(el('p', 'field-hint', "Salve a tarefa para iniciar seu histórico."));
 }
 function taskFields() {
-  const data = {title: $('#title').value.trim(), description: $('#description').value, priority: $('#priority').value};
+  const data = {title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value || null, tags: [...new Map($('#task-tags').value.split(',').map(tag=>tag.trim()).filter(Boolean).map(tag=>[tag.toLocaleLowerCase('pt-BR'),tag])).values()]};
   if (!editing && (can('assign_users') || can('assign_self'))) {
     data.assignees = can('view_task_assignees')
       ? [...$('#assignees').selectedOptions].map(option => option.value)
@@ -480,8 +488,6 @@ async function changeAssignments(add, remove) {
 function queueAssignment(action) {
   const taskId = editing, actorId = user?.id, epoch = taskDialogEpoch;
   assignmentQueue = assignmentQueue.then(async () => {
-    // A history read or autosave may still be finishing when a selection changes.
-    // Serialize assignment changes instead of silently dropping the input.
     while (pending) await new Promise(resolve => setTimeout(resolve, 40));
     if (editing !== taskId || user?.id !== actorId || taskDialogEpoch !== epoch || !$('#dialog').open) return;
     await run(action);
@@ -700,7 +706,7 @@ function legacyBoard() {
     const columns = [['todo', 'To do', 'todo'], ['doing', "Em andamento", 'doing'], ['done', "Concluído", 'done']];
     const extra = JSON.parse(localStorage.getItem('everyday-kanban-columns-v1') || '[]');
     if (tasks || extra.length) return {columns: columns.concat(extra.map(c => [c[0], c[1], 'todo'])), tasks: tasks || []};
-  } catch { /* Browser data remains untouched; JSON import is also available. */ }
+  } catch {  }
   return null;
 }
 async function importBoard(payload) {
@@ -819,7 +825,7 @@ async function closeTask() {
 }
 $('#cancel').onclick = () => run(closeTask);
 $('#dialog').addEventListener('cancel', event => { event.preventDefault(); run(closeTask); });
-for (const id of ['title', 'description', 'priority']) {
+for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'task-tags']) {
   $('#' + id).addEventListener('input', scheduleAutosave);
   $('#' + id).addEventListener('change', scheduleAutosave);
 }
@@ -910,8 +916,6 @@ $('#import-file').onchange = () => run(async () => {
   try { payload = JSON.parse(await file.text()); } catch { throw new Error("O arquivo de importação não é um JSON válido."); }
   await importBoard(payload); $('#import-file').value = '';
 });
-// Refresh snapshots only while the user is not editing. Writes always use the revision
-// that was loaded with the form, so polling cannot silently overwrite a concurrent edit.
 setInterval(() => {
   if (pending || !user || user.must_change_password || !board || $('#workspace').hidden || document.querySelector('dialog[open]') || document.hidden) return;
   run(async () => {
@@ -939,8 +943,6 @@ run(async () => {
   try { await signedIn(await api('/me')); }
   catch (error) { showLogin(); if (error.status !== 401) message(error.message, true); }
 });
-
-// Keep native form feedback in Portuguese regardless of the browser's interface language.
 document.addEventListener('invalid', event => {
   const input = event.target;
   if (!input.setCustomValidity) return;

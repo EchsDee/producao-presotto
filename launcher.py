@@ -1,4 +1,3 @@
-"""Stable supervisor. Run this file for managed updates; it never runs package scripts."""
 import hashlib
 import json
 import os
@@ -21,7 +20,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def process_identity(pid, terminate_if=None):
-    """PID plus OS creation time prevents killing an unrelated reused PID."""
+
     if os.name == 'nt':
         import ctypes
         from ctypes import wintypes
@@ -31,15 +30,21 @@ def process_identity(pid, terminate_if=None):
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
         kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
         handle = kernel.OpenProcess(0x1000 | (1 if terminate_if else 0), False, pid)
         if not handle:
             return None
         try:
+            exit_code = wintypes.DWORD()
+            if kernel.GetExitCodeProcess(handle, ctypes.byref(exit_code)) and exit_code.value != 259:
+                return None
             times = [wintypes.FILETIME() for _ in range(4)]
             if not kernel.GetProcessTimes(handle, *(ctypes.byref(x) for x in times)):
                 raise RuntimeError('Não foi possível verificar o processo do servidor.')
             identity = str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
             if terminate_if == identity and not kernel.TerminateProcess(handle, 0):
+                if kernel.GetExitCodeProcess(handle, ctypes.byref(exit_code)) and exit_code.value != 259:
+                    return None
                 raise RuntimeError('Não foi possível parar o servidor anterior.')
             return identity
         finally:
@@ -105,7 +110,7 @@ def supervise():
     def stop():
         nonlocal child
         if child and child.poll() is None:
-            # Also stops the actual interpreter behind Windows virtualenv redirectors.
+
             try:
                 call('/_update/stop')
                 child.wait(timeout=3)
@@ -137,7 +142,7 @@ def supervise():
         raise RuntimeError('A nova versão não passou na verificação de saúde.')
 
     def restore(journal):
-        # Failed migrations cannot leave a newer schema under the previous code.
+
         backup = Path(journal['backup'])
         if backup.exists():
             database_backup(database, directory / ('failed-' + uuid4().hex + '.sqlite3'))
@@ -145,7 +150,7 @@ def supervise():
         atomic(directory / 'active.json', {'path': journal['old_path']})
 
     with lock(directory / 'supervisor'):
-        # A previous supervisor may have been interrupted. Stop only its authenticated child.
+
         previous_child = read(directory / 'child.json')
         if previous_child and previous_child['identity']:
             process_identity(previous_child['pid'], terminate_if=previous_child['identity'])
@@ -171,7 +176,7 @@ def supervise():
             while True:
                 job = read(directory / 'job.json')
                 if job:
-                    # Let the HTTP response and activity transaction finish first.
+
                     time.sleep(2)
                     with lock(directory):
                         active = Path(read(directory / 'active.json', {'path': str(ROOT)})['path'])
@@ -207,7 +212,7 @@ def supervise():
                         with closing(sqlite3.connect(database)) as db:
                             schema = db.execute('PRAGMA user_version').fetchone()[0]
                         journal = {'old_path': str(old), 'backup': str(backup), 'job': job}
-                        # The journal is durable before any new code or migration is run.
+
                         atomic(directory / 'journal.json', journal)
                         if (ROOT / '.env').exists():
                             shutil.copyfile(ROOT / '.env', backup.with_suffix('.env'))

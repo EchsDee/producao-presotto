@@ -1,4 +1,3 @@
-"""Build a release asset, without data, environment files or credentials."""
 import hashlib
 import json
 import sys

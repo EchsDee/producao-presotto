@@ -1,4 +1,3 @@
-"""Real browser smoke test. Uses a disposable database and the installed Edge browser."""
 import sys
 import tempfile
 import threading
@@ -25,11 +24,11 @@ def main():
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.goto(f'http://127.0.0.1:{server.server_port}')
                 expect(page.locator('#login-screen')).to_be_visible()
-                page.locator('#username').fill('Monke')
-                page.locator('#login-password').fill('monkeman')
+                page.locator('#username').fill('Admin')
+                page.locator('#login-password').fill('adminpasspres')
                 page.locator('#login-form button').click()
                 expect(page.locator('#password-screen')).to_be_visible()
-                page.locator('#current-password').fill('monkeman')
+                page.locator('#current-password').fill('adminpasspres')
                 page.locator('#new-password').fill('browser-admin-password')
                 page.locator('#confirm-password').fill('browser-admin-password')
                 page.locator('#password-form .primary').click()
@@ -40,7 +39,7 @@ def main():
                 page.locator('#column-submit').click()
                 expect(page.locator('#column-dialog')).not_to_be_visible()
                 review = page.get_by_role('region', name='Review', exact=True)
-                # Sections have an accessible name and are therefore regions.
+
                 expect(review).to_be_visible()
                 review.get_by_role('button', name='Configurações de Review').click()
                 page.locator('#column-type').select_option('done')
@@ -49,8 +48,11 @@ def main():
                 review.get_by_role('button', name='+ Adicionar tarefa').click()
                 page.locator('#title').fill('Browser task')
                 page.locator('#description').fill('Original description')
+                page.locator('#task-tags').fill('Corte, Urgente')
+                page.locator('#task-date').fill('2026-10-21')
+                page.locator('#desired-delivery').fill('2026-11-05')
                 page.locator('#assignee-picker').click()
-                page.locator('#assignee-options label').filter(has_text='Monke').locator('input').check()
+                page.locator('#assignee-options label').filter(has_text='Admin').locator('input').check()
                 page.locator('#save-task').click()
                 expect(page.locator('#form-title')).to_have_text('Detalhes da tarefa')
                 dxf = b'0\r\nSECTION\r\n2\r\nENTITIES\r\n0\r\nENDSEC\r\n0\r\nEOF\r\n'
@@ -63,7 +65,7 @@ def main():
                 assert Path(download_info.value.path()).read_bytes() == dxf
                 page.locator('#description').fill('Automatically saved description')
                 expect(page.locator('#notice')).to_have_text('Alterações salvas.')
-                # Wait for the actual autosave, rather than an earlier success message.
+
                 page.wait_for_function("savedTaskFields.includes('Automatically saved description')")
                 page.locator('#cancel').click()
                 expect(page.locator('#dialog')).not_to_be_visible()
@@ -71,9 +73,17 @@ def main():
                 expect(page.locator('#workspace')).to_be_visible()
                 expect(page.locator('#summary')).to_contain_text('1 concluída')
                 expect(page.locator('.card')).to_contain_text('Automatically saved description')
+                expect(page.locator('.card')).to_contain_text('21/10/2026')
+                expect(page.locator('.card')).to_contain_text('05/11/2026')
+                expect(page.locator('.card .task-tag')).to_have_text(['Corte','Urgente'])
+                page.locator('#search').fill('Urgente')
+                expect(page.locator('.card')).to_have_count(1)
+                page.locator('#search').fill('tag-inexistente')
+                expect(page.locator('.card')).to_have_count(0)
+                page.locator('#search').fill('')
                 page.locator('#my-tasks').click()
                 expect(page.locator('.card')).to_have_count(1)
-                page.locator('#assignee-filter').select_option(label='Monke')
+                page.locator('#assignee-filter').select_option(label='Admin')
                 expect(page.locator('#my-tasks')).to_have_attribute('aria-pressed', 'false')
                 expect(page.locator('.card')).to_have_count(1)
                 page.locator('#assignee-filter').select_option('')

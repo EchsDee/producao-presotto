@@ -1,4 +1,3 @@
-"""Visual and Portuguese locale checks, using sample data in a disposable database."""
 import sys
 import threading
 from pathlib import Path

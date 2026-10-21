@@ -83,7 +83,7 @@ class ProfileTests(unittest.TestCase):
             return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
         bomb=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',20000,20000,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(b''))+chunk(b'IEND',b'')
         self.assertEqual(self.photo('bomb.png',bomb).status_code,400)
-        self.assertEqual(self.client.get('/api/profile').json['user']['display_name'],'Monke')
+        self.assertEqual(self.client.get('/api/profile').json['user']['display_name'],'Admin')
         self.assertFalse(self.client.get('/api/profile').json['user']['avatar_url'])
         entries=self.client.get('/api/activity?action=user.avatar_changed').json['entries']
         self.assertEqual(entries,[])
@@ -99,7 +99,7 @@ class ProfileTests(unittest.TestCase):
         visible,_=self.login_user('visible')
         self.assertEqual(visible.get(url).status_code,200)
         updated=self.photo(content=picture('PNG',(500,600)),version=result.json['user']['profile_version'])
-        # A different framing of a solid image can normalize to identical bytes; keep the revision stable in that case.
+
         version=updated.json['user']['profile_version']
         removed=self.request('PATCH','/api/profile',{'version':version,'avatar_action':'remove'})
         self.assertEqual(removed.status_code,200)
@@ -151,12 +151,14 @@ class ProfileTests(unittest.TestCase):
             before=tuple(db.execute('SELECT id,username,password_hash,role,permissions FROM users').fetchone())
             for column in ['display_name','avatar','avatar_version','profile_version']:
                 db.execute('ALTER TABLE users DROP COLUMN '+column)
+            for field in ('task_date','desired_delivery','tags'):
+                db.execute('ALTER TABLE tasks DROP COLUMN '+field)
             db.execute('PRAGMA user_version=2')
         create_app(self.config)
         with closing(connect(self.path)) as db:
             after=tuple(db.execute('SELECT id,username,password_hash,role,permissions FROM users').fetchone())
             self.assertEqual(before,after)
-            self.assertEqual(db.execute('SELECT display_name FROM users').fetchone()[0],'Monke')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],3)
+            self.assertEqual(db.execute('SELECT display_name FROM users').fetchone()[0],'Admin')
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],5)
             self.assertFalse(db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertEqual(self.board()['tasks'][0]['assignees'],[self.admin['id']])

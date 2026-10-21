@@ -1,4 +1,3 @@
-"""Create a consistent SQLite backup, including attachment bytes, while the app runs."""
 import argparse
 import os
 import sqlite3
@@ -12,7 +11,7 @@ def backup(source, destination):
     if source == destination:
         raise ValueError('Choose a different backup location.')
     destination.parent.mkdir(parents=True, exist_ok=True)
-    # Exclusive creation prevents accidentally replacing an existing backup.
+
     with destination.open('xb'):
         pass
     try:

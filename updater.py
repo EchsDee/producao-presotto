@@ -1,4 +1,3 @@
-"""Restricted release protocol. Persistent state lives beside the database, never in code slots."""
 import hashlib
 import json
 import os
@@ -21,7 +20,7 @@ DEFAULT_REPOSITORY = {'owner': 'EchsDee', 'repository': 'producao-presotto', 'ch
 
 
 def github_token(directory):
-    """Credentials stay in the service environment or the OS-backed GitHub CLI store."""
+
     token = os.environ.get('KANBAN_GITHUB_TOKEN', '')
     if token:
         return token
@@ -128,7 +127,7 @@ def allowed(name):
 
 
 def unpack(raw, destination, current, requirements):
-    """No extractall, scripts, symlinks, paths from the browser, or persistent files."""
+
     import io
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         entries = archive.infolist()
@@ -360,7 +359,7 @@ def register(app, need, body, audit):
                 if rollback and target['schema'] != g.db.execute('PRAGMA user_version').fetchone()[0]:
                     raise ValueError('Rollback bloqueado: esquema do banco incompatível. Use recuperação assistida para preservar os dados atuais.')
                 event('rollback_requested' if rollback else 'install_requested', {'from': installed, 'to': target['version']})
-                # Commit authorization/audit before the supervisor can stop this process.
+
                 g.db.commit()
                 atomic(directory / 'progress.json', {'status': 'queued', 'percent': 0})
                 atomic(directory / 'job.json', {'rollback': rollback, 'actor_id': g.user['id'], 'actor_name': g.user['username'], 'from': installed, 'to': target['version'], 'created_at': time.time()})

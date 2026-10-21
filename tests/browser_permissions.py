@@ -1,4 +1,3 @@
-"""Browser checks for independently configured file and assignment permissions."""
 import sys
 import threading
 from pathlib import Path
@@ -96,7 +95,7 @@ def main():
             page.locator('#assignment-person').select_option(label='upload-only')
             page.locator('#assignment-add').click()
             expect(page.locator('#notice')).to_have_text('Alterações salvas.')
-            # Assignment visibility remains denied, even with assignment-management permission.
+
             assert page.evaluate('board.tasks[0].assignees.length') == 0
             page.locator('#assignment-remove').click()
             expect(page.locator('#task-history')).not_to_contain_text('atribuiu o usuário “upload-only”')

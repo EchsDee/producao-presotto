@@ -1,4 +1,4 @@
-name: Publicar atualização
+name: Publicar release Windows
 on:
   push:
     tags:
@@ -7,27 +7,33 @@ permissions:
   contents: write
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Validar tag e gerar pacote
+      - name: Preparar runtime
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt
+          New-Item -ItemType Directory -Path data/build-cache -Force | Out-Null
+          Invoke-WebRequest https://www.python.org/ftp/python/3.13.17/python-3.13.17-embed-amd64.zip -OutFile data/build-cache/python-3.13.17-embed-amd64.zip
+      - name: Gerar ZIP e instalador
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+        shell: pwsh
         run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          assert os.environ['RELEASE_TAG'] == 'v' + Path('VERSION').read_text().strip(), 'A tag deve corresponder a VERSION'
-          PY
-          python build_release.py presotto-update.zip
+          python -c "import os; from pathlib import Path; assert os.environ['RELEASE_TAG'] == 'v' + Path('VERSION').read_text().strip()"
+          python build_windows.py
       - name: Publicar Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+        shell: pwsh
         run: |
-          flags=()
-          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" presotto-update.zip --verify-tag --generate-notes "${flags[@]}"
+          $version = (Get-Content VERSION -Raw).Trim()
+          $assets = Get-ChildItem "releases/$version" -File | ForEach-Object { $_.FullName }
+          $flags = @()
+          if ($env:RELEASE_TAG.Contains('-')) { $flags += '--prerelease' }
+          gh release create $env:RELEASE_TAG @assets --verify-tag --generate-notes @flags

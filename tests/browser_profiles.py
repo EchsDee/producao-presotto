@@ -1,4 +1,3 @@
-"""Profile, avatar and assignment integration in a real browser; disposable data only."""
 import sys
 import threading
 from pathlib import Path

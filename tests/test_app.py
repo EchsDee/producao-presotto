@@ -20,11 +20,11 @@ class KanbanTests(unittest.TestCase):
         self.config = {'TESTING': True, 'DATABASE': self.path, 'MAX_FILE_BYTES': 4096}
         self.app = create_app(self.config)
         self.client = self.app.test_client()
-        result = self.client.post('/api/login', json={'username': 'Monke', 'password': 'monkeman'})
+        result = self.client.post('/api/login', json={'username': 'Admin', 'password': 'adminpasspres'})
         self.assertEqual(result.status_code, 200)
         self.csrf = result.json['csrf']
         self.admin = result.json['user']
-        result = self.request('POST', '/api/password', {'current_password': 'monkeman', 'new_password': 'admin-password-123', 'confirm_password': 'admin-password-123'})
+        result = self.request('POST', '/api/password', {'current_password': 'adminpasspres', 'new_password': 'admin-password-123', 'confirm_password': 'admin-password-123'})
         self.assertEqual(result.status_code, 200)
         self.csrf = result.json['csrf']
         self.admin = result.json['user']
@@ -86,15 +86,15 @@ class KanbanTests(unittest.TestCase):
         create_app(self.config)
         with closing(connect(self.path)) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM users').fetchone()[0], 0)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 5)
 
     def test_login_logout_cookie_and_csrf(self):
         self.assertEqual(self.app.test_client().get('/api/boards').status_code, 401)
         self.assertEqual(self.client.post('/api/boards', json={'name': 'Forged'}).status_code, 403)
-        cross = self.client.post('/api/login', json={'username': 'Monke', 'password': 'admin-password-123'},
+        cross = self.client.post('/api/login', json={'username': 'Admin', 'password': 'admin-password-123'},
                                  headers={'Origin': 'https://evil.example'})
         self.assertEqual(cross.status_code, 403)
-        login = self.app.test_client().post('/api/login', json={'username': 'Monke', 'password': 'admin-password-123'})
+        login = self.app.test_client().post('/api/login', json={'username': 'Admin', 'password': 'admin-password-123'})
         cookie = login.headers['Set-Cookie']
         self.assertIn('HttpOnly', cookie)
         self.assertIn('SameSite=Strict', cookie)
@@ -119,7 +119,7 @@ class KanbanTests(unittest.TestCase):
         board = client.get('/api/boards/' + self.board_id).json['board']
         self.assertEqual(board['tasks'][0]['id'], task_id)
         self.assertEqual(board['tasks'][0]['description'], 'Details')
-        self.assertEqual(client.post('/api/login', json={'username': 'Monke', 'password': 'monkeman'}).status_code, 401)
+        self.assertEqual(client.post('/api/login', json={'username': 'Admin', 'password': 'adminpasspres'}).status_code, 401)
         with closing(connect(self.path)) as db:
             stored = db.execute('SELECT token_hash FROM sessions LIMIT 1').fetchone()[0]
             self.assertNotEqual(stored, cookie)

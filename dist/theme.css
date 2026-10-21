@@ -10,3 +10,7 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;scroll-behavior:auto!important}}
 
 .update-notes{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:260px;overflow:auto}#updates-panel progress{width:100%;accent-color:var(--yellow)}#update-settings{margin-top:20px}#update-settings summary{cursor:pointer;font-weight:700}#update-status p{margin:6px 0}#update-history{margin-top:18px}
+
+.task-date-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.task-date-fields input{min-width:0;width:100%}.task-date{font-size:.8rem;color:var(--muted);margin:4px 0}
+
+.task-tags{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.task-tag{display:inline-block;padding:3px 8px;border:1px solid currentColor;border-radius:12px;font-size:.75rem;color:var(--navy);overflow-wrap:anywhere;max-width:100%}

@@ -33,7 +33,7 @@ class UpdateTests(unittest.TestCase):
         source = Path(self.temp.name) / ('broken' if broken else 'source')
         from launcher import snapshot
         snapshot(Path(__file__).resolve().parents[1], source)
-        (source / 'VERSION').write_text('1.0.1')
+        (source / 'VERSION').write_text('1.0.2')
         if broken:
             (source / 'app.py').write_text("raise RuntimeError('broken release')")
         output = Path(self.temp.name) / 'bundle.zip'
@@ -41,7 +41,7 @@ class UpdateTests(unittest.TestCase):
         return output.read_bytes()
 
     def release(self, raw):
-        return {'tag_name':'v1.0.1','draft':False,'prerelease':False,'body':'Notas <script>alert(1)</script>',
+        return {'tag_name':'v1.0.2','draft':False,'prerelease':False,'body':'Notas <script>alert(1)</script>',
                 'published_at':'2026-10-21T12:00:00Z', 'assets':[{'id':123,'name':'presotto-update.zip',
                 'digest':'sha256:'+hashlib.sha256(raw).hexdigest(),'size':len(raw)}]}
 
@@ -53,9 +53,9 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(result.status_code,200,result.json)
 
     def test_semver(self):
-        values=['1.0.0-alpha','1.0.0-alpha.2','1.0.0-alpha.10','1.0.0-beta','1.0.0-rc.1','1.0.0','1.0.1','2.0.0']
+        values=['1.0.1-alpha','1.0.1-alpha.2','1.0.1-alpha.10','1.0.1-beta','1.0.1-rc.1','1.0.1','1.0.2','2.0.0']
         self.assertEqual(sorted(values,key=updater.version),values)
-        for invalid in ('1.0','1.02.0','1.0.0-01','1.0.0-a..b','1.0.0;whoami'):
+        for invalid in ('1.0','1.02.0','1.0.1-01','1.0.1-a..b','1.0.1;whoami'):
             with self.assertRaises(ValueError): updater.version(invalid)
 
     def test_default_repository_and_opt_in_cli_credential(self):
@@ -110,14 +110,14 @@ class UpdateTests(unittest.TestCase):
         self.configure()
         raw=self.bundle()
         self.download(raw)
-        self.assertEqual((self.directory/'staging/VERSION').read_text(),'1.0.1')
-        self.assertEqual(self.client.get('/api/updates').json['downloaded']['version'],'1.0.1')
+        self.assertEqual((self.directory/'staging/VERSION').read_text(),'1.0.2')
+        self.assertEqual(self.client.get('/api/updates').json['downloaded']['version'],'1.0.2')
         self.assertFalse((self.directory/'staging/data').exists())
         with patch.dict(os.environ,{'KANBAN_MANAGED':'1'}):
-            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.1'}).status_code,400)
-            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.2','confirm':True}).status_code,400)
-            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.1','confirm':True}).status_code,202)
-            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.1','confirm':True}).status_code,503)
+            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.2'}).status_code,400)
+            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.3','confirm':True}).status_code,400)
+            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.2','confirm':True}).status_code,202)
+            self.assertEqual(self.request('POST','/api/updates/install',{'version':'1.0.2','confirm':True}).status_code,503)
             self.assertEqual(self.request('PATCH','/api/boards/'+self.board_id,{'version':0,'name':'blocked'}).status_code,503)
         self.assertEqual(self.client.get('/api/updates/progress').json['progress']['status'],'queued')
 
@@ -139,7 +139,7 @@ class UpdateTests(unittest.TestCase):
         raw=self.bundle()
         preview={**self.release(raw),'tag_name':'2.0.0-beta.1','prerelease':True}
         with patch('updater.github',return_value=[preview,self.release(raw)]):
-            self.assertEqual(self.request('POST','/api/updates/check',{}).json['state']['release']['version'],'1.0.1')
+            self.assertEqual(self.request('POST','/api/updates/check',{}).json['state']['release']['version'],'1.0.2')
         req=__import__('urllib.request',fromlist=['Request']).Request('https://api.github.com/x',headers={'Authorization':'Bearer secret'})
         with self.assertRaises(ValueError): updater.Redirect().redirect_request(req,None,302,'',{},'https://evil.test/a')
         redirected=updater.Redirect().redirect_request(req,None,302,'',{},'https://release-assets.githubusercontent.com/a')
@@ -157,7 +157,7 @@ class UpdateTests(unittest.TestCase):
             stream=io.BytesIO()
             with zipfile.ZipFile(stream,'w') as archive:
                 for key,value in modified.items():archive.writestr(key,value)
-            with self.assertRaises(ValueError):updater.unpack(stream.getvalue(),self.directory/'unsafe','1.0.0',Path('requirements.txt').read_bytes())
+            with self.assertRaises(ValueError):updater.unpack(stream.getvalue(),self.directory/'unsafe','1.0.1',Path('requirements.txt').read_bytes())
         self.assertFalse((self.directory/'unsafe').exists())
 
     def test_lock_prevents_multiple_operations(self):

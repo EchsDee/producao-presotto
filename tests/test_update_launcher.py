@@ -1,4 +1,3 @@
-"""Real supervisor/Waitress restart tests; exclusively disposable databases and ports."""
 import json
 import os
 import socket
@@ -20,6 +19,14 @@ from launcher import process_identity
 
 
 class LauncherTests(unittest.TestCase):
+    def test_finished_process_is_not_terminated_again(self):
+        with subprocess.Popen([sys.executable,'-c','import time; time.sleep(10)']) as process:
+            identity=process_identity(process.pid)
+            self.assertTrue(identity)
+            process.terminate()
+            process.wait(timeout=5)
+            self.assertIsNone(process_identity(process.pid,terminate_if=identity))
+
     setUp = test_updates.UpdateTests.setUp
     request = test_updates.UpdateTests.request
     configure = test_updates.UpdateTests.configure
@@ -80,29 +87,29 @@ class LauncherTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db:
             original={table:db.execute('SELECT * FROM '+table+' ORDER BY 1').fetchall() for table in tables}
         self.boot()
-        self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.0')
-        self.http('/api/updates/install',{'confirm':True,'version':'1.0.1'})
+        self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.1')
+        self.http('/api/updates/install',{'confirm':True,'version':'1.0.2'})
         self.wait_for(lambda:len(read(self.directory/'history.json',[]))==1 and not (self.directory/'job.json').exists())
-        self.assertEqual(self.http('/health',health=True)['version'],'1.0.1')
+        self.assertEqual(self.http('/health',health=True)['version'],'1.0.2')
         self.assertEqual(read(self.directory/'history.json')[0]['status'],'installed')
         with closing(sqlite3.connect(self.path)) as db:
             for table in tables:
                 self.assertEqual(db.execute('SELECT * FROM '+table+' ORDER BY 1').fetchall(),original[table],table)
         board=self.http('/api/boards/'+self.board_id)['board']
         created=self.http('/api/boards/'+self.board_id+'/tasks',{'version':board['version'],'column_id':board['columns'][0]['id'],'title':'Criada depois da atualização','description':'Preservar no rollback','priority':'normal','assignees':[]})
-        self.http('/api/updates/rollback',{'confirm':True,'version':'1.0.0'})
+        self.http('/api/updates/rollback',{'confirm':True,'version':'1.0.1'})
         self.wait_for(lambda:len(read(self.directory/'history.json',[]))==2 and not (self.directory/'job.json').exists())
-        self.assertEqual(self.http('/health',health=True)['version'],'1.0.0')
+        self.assertEqual(self.http('/health',health=True)['version'],'1.0.1')
         board=self.http('/api/boards/'+self.board_id)['board']
         self.assertTrue(any(t['title']=='Criada depois da atualização' for t in board['tasks']))
         self.assertEqual(read(self.directory/'history.json')[-1]['status'],'rolled_back')
 
     def test_broken_release_restores_database_and_previous_code(self):
         self.configure();self.download(self.bundle(broken=True));self.boot()
-        self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.0')
-        self.http('/api/updates/install',{'confirm':True,'version':'1.0.1'})
+        self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.1')
+        self.http('/api/updates/install',{'confirm':True,'version':'1.0.2'})
         self.wait_for(lambda:len(read(self.directory/'history.json',[]))==1 and not (self.directory/'job.json').exists())
-        self.assertEqual(self.http('/health',health=True)['version'],'1.0.0')
+        self.assertEqual(self.http('/health',health=True)['version'],'1.0.1')
         self.assertEqual(read(self.directory/'history.json')[0]['status'],'failed')
         self.assertEqual(self.http('/api/boards')['boards'][0]['id'],self.board_id)
         self.assertTrue(list(self.directory.glob('before-*.sqlite3')))
@@ -111,7 +118,7 @@ class LauncherTests(unittest.TestCase):
     def test_interrupted_install_recovers_on_supervisor_restart(self):
         self.configure()
         raw=self.bundle()
-        # A valid but deliberately slow release makes the interruption deterministic.
+
         source=Path(self.temp.name)/'source'
         code=(source/'app.py').read_text(encoding='utf-8')
         code=code.replace("if __name__ == '__main__':", "if __name__ == '__main__':\n    time.sleep(12)")
@@ -119,28 +126,28 @@ class LauncherTests(unittest.TestCase):
         from build_release import build
         build(source,Path(self.temp.name)/'slow.zip')
         self.download((Path(self.temp.name)/'slow.zip').read_bytes())
-        self.boot();self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.0')
-        self.http('/api/updates/install',{'confirm':True,'version':'1.0.1'})
+        self.boot();self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.1')
+        self.http('/api/updates/install',{'confirm':True,'version':'1.0.2'})
         self.wait_for(lambda:(self.directory/'journal.json').exists() and (self.directory/'child.json').exists())
         self.process.kill();self.process.wait(timeout=5)
         self.boot()
         self.wait_for(lambda:len(read(self.directory/'history.json',[]))==1 and not (self.directory/'job.json').exists())
-        self.assertEqual(self.http('/health',health=True)['version'],'1.0.0')
+        self.assertEqual(self.http('/health',health=True)['version'],'1.0.1')
         self.assertIn('interrompida',read(self.directory/'history.json')[0]['message'])
 
     def test_failed_migration_recovers_previous_schema(self):
         self.configure();self.bundle()
         source=Path(self.temp.name)/'source'
-        (source/'migrations/004_broken.sql').write_text('CREATE TABLE must_rollback(id INTEGER); INSERT INTO missing_table VALUES(1);')
+        (source/'migrations/006_broken.sql').write_text('CREATE TABLE must_rollback(id INTEGER); INSERT INTO missing_table VALUES(1);')
         from build_release import build
         build(source,Path(self.temp.name)/'migration.zip')
         self.download((Path(self.temp.name)/'migration.zip').read_bytes());self.boot()
-        self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.0')
-        self.http('/api/updates/install',{'confirm':True,'version':'1.0.1'})
+        self.wait_for(lambda:self.http('/health',health=True)['version']=='1.0.1')
+        self.http('/api/updates/install',{'confirm':True,'version':'1.0.2'})
         self.wait_for(lambda:len(read(self.directory/'history.json',[]))==1 and not (self.directory/'job.json').exists())
-        self.assertEqual(self.http('/health',health=True)['version'],'1.0.0')
+        self.assertEqual(self.http('/health',health=True)['version'],'1.0.1')
         with closing(sqlite3.connect(self.path)) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],5)
             self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='must_rollback'").fetchone())
 
 

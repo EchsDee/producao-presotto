@@ -1,4 +1,3 @@
-"""Produção Presotto: same-origin Flask API, SQLite persistence, server-side sessions."""
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +10,7 @@ import sqlite3
 import time
 import zipfile
 import warnings
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -21,6 +21,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from flask import Flask, abort, g, jsonify, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import updater
 
 ROOT = Path(__file__).resolve().parent
@@ -71,7 +72,7 @@ ACTIVITY_ACTIONS = {
 }
 EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'png', 'jpg', 'jpeg', 'zip', 'dxf'}
 PH = PasswordHasher(type=Type.ID, time_cost=3, memory_cost=65536, parallelism=4)
-# Used for unknown-user password verification to avoid a trivial username timing oracle.
+
 DUMMY_HASH = PH.hash(secrets.token_urlsafe(32))
 
 
@@ -130,14 +131,14 @@ def initialize(path):
         if version > len(migrations):
             raise RuntimeError('Database is newer than this application; use the matching application version.')
         for migration in migrations[version:]:
-            # These migrations contain plain DDL, one statement per semicolon. executescript
-            # is intentionally avoided because it implicitly commits the initialization transaction.
+
+
             for statement in migration.read_text(encoding='utf-8').split(';'):
                 if statement.strip():
                     db.execute(statement)
             if migration.name.startswith('002_'):
-                # Preserve explicit legacy decisions when splitting old combined rights.
-                # Missing overrides use the recommended defaults for the new permissions.
+
+
                 for user in db.execute('SELECT id,permissions FROM users').fetchall():
                     overrides = json.loads(user['permissions'])
                     for old, new in [('view_boards', 'download_attachments'),
@@ -152,7 +153,7 @@ def initialize(path):
         if not db.execute("SELECT 1 FROM metadata WHERE key='initialized'").fetchone():
             admin_id = uid()
             db.execute('INSERT INTO users(id,username,password_hash,role,created_at) VALUES(?,?,?,?,?)',
-                       (admin_id, 'Monke', PH.hash('monkeman'), 'Administrator', now()))
+                       (admin_id, 'Admin', PH.hash('adminpasspres'), 'Administrator', now()))
             board_id = uid()
             db.execute('INSERT INTO boards(id,name,position,created_by,created_at) VALUES(?,?,?,?,?)',
                        (board_id, 'Meu quadro', 0, admin_id, now()))
@@ -239,8 +240,8 @@ def create_app(config=None):
 
     def audit(action, entity_type, entity_id, entity_name, *, board_id=None, task=None,
               previous=None, new=None):
-        # Deliberately accept small, explicitly selected snapshots, never raw request bodies,
-        # user rows, session rows, password hashes, or attachment contents.
+
+
         board = lookup('boards', board_id) if board_id else None
         actor = lookup('users', g.user['id'])
         if entity_type == 'user':
@@ -256,7 +257,7 @@ def create_app(config=None):
 
     def task_snapshot(task):
         col = lookup('columns', task['column_id'])
-        return {**{k: task[k] for k in ('title', 'description', 'priority', 'column_id', 'position')},
+        return {**{k: task[k] for k in ('title', 'description', 'priority', 'column_id', 'position', 'task_date', 'desired_delivery')}, 'tags': json.loads(task['tags']),
                 'column_name': col['name']}
 
     def file_snapshot(attachment):
@@ -318,6 +319,7 @@ def create_app(config=None):
         tasks = [dict(t) for t in db().execute(
             'SELECT * FROM tasks WHERE board_id=? ORDER BY position,id', (board_id,))]
         for task in tasks:
+            task['tags'] = json.loads(task['tags'])
             assignees = [r[0] for r in db().execute(
                 'SELECT user_id FROM task_assignees WHERE task_id=? ORDER BY user_id', (task['id'],))]
             task['assigned_to_me'] = g.user['id'] in assignees
@@ -334,8 +336,8 @@ def create_app(config=None):
         if not request.path.startswith('/api/'):
             return
         g.db = connect(app.config['DATABASE'])
-        # All writes, including permission checks, happen within a serialized transaction.
-        # Reads use a consistent snapshot while other users continue writing in WAL mode.
+
+
         g.db.execute('BEGIN' if request.method in ('GET', 'HEAD') else 'BEGIN IMMEDIATE')
         g.user = None
         token = request.cookies.get('kanban_session', '')
@@ -491,7 +493,7 @@ def create_app(config=None):
         if not isinstance(supplied, str) or len(supplied) > 256:
             abort(400, description='Credenciais inválidas.')
         timestamp = int(time.time())
-        # Persistent per-account and per-address throttles; never trust X-Forwarded-For.
+
         keys = ['account:' + username.casefold(), 'address:' + (request.remote_addr or 'local')]
         db().execute('DELETE FROM login_attempts WHERE window_start<?', (timestamp - 900,))
         for key, limit in zip(keys, [10, 50]):
@@ -729,7 +731,7 @@ def create_app(config=None):
             abort(403, description='Somente um administrador pode conceder o perfil de Administrador.')
         db().execute('UPDATE users SET username=?,enabled=?,role=?,permissions=?,version=version+1 WHERE id=?',
                      (name, int(enabled), role, overrides, user_id))
-        # Revoke sessions on any administrative account change. Permissions are also checked live.
+
         db().execute('DELETE FROM sessions WHERE user_id=?', (user_id,))
         if name != target['username'] or enabled != bool(target['enabled']):
             audit('user.updated', 'user', user_id, name,
@@ -918,6 +920,38 @@ def create_app(config=None):
             abort(400, description='Prioridade inválida.')
         return title, description, priority
 
+    def task_tags(data, existing=None):
+        if 'tags' not in data:
+            return json.loads(existing['tags']) if existing is not None else []
+        values = data['tags']
+        if not isinstance(values, list) or len(values) > 20:
+            abort(400, description='Informe no máximo 20 tags por tarefa.')
+        tags, seen = [], set()
+        for value in values:
+            if not isinstance(value, str) or not 1 <= len(value.strip()) <= 40 or any(ord(c) < 32 or ord(c) == 127 for c in value) or ',' in value:
+                abort(400, description='Cada tag deve ter entre 1 e 40 caracteres, sem vírgulas ou quebras de linha.')
+            value = value.strip()
+            if value.casefold() not in seen:
+                tags.append(value)
+                seen.add(value.casefold())
+        return tags
+
+    def task_dates(data, existing=None):
+        dates = {}
+        for key in ('task_date', 'desired_delivery'):
+            value = data[key] if key in data else existing[key] if existing is not None else None
+            if value is None or value == '':
+                dates[key] = None
+                continue
+            if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+                abort(400, description='Data inválida. Use o formato AAAA-MM-DD.')
+            try:
+                datetime.strptime(value, '%Y-%m-%d')
+            except ValueError:
+                abort(400, description='Informe uma data válida.')
+            dates[key] = value
+        return dates
+
     @app.post('/api/boards/<board_id>/tasks')
     def create_task(board_id):
         need('create_tasks')
@@ -926,10 +960,13 @@ def create_app(config=None):
         column_id = data.get('column_id')
         column_for(board_id, column_id)
         title, description, priority = task_values(data)
+        dates = task_dates(data)
+        tags = task_tags(data)
         position = db().execute('SELECT COALESCE(MAX(position),-1)+1 FROM tasks WHERE column_id=?', (column_id,)).fetchone()[0]
         task_id = uid()
-        db().execute('INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)',
-                     (task_id, board_id, column_id, title, description, priority, position, g.user['id'], now(), now()))
+        db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                     (task_id, board_id, column_id, title, description, priority, position, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery']))
+        db().execute('UPDATE tasks SET tags=? WHERE id=?', (json.dumps(tags, ensure_ascii=False), task_id))
         task = lookup('tasks', task_id)
         audit('task.created', 'task', task_id, title, board_id=board_id, task=task, new=task_snapshot(task))
         assign(task_id, data)
@@ -943,13 +980,16 @@ def create_app(config=None):
         task = lookup('tasks', task_id)
         board_write(task['board_id'], data)
         title, description, priority = task_values(data)
-        # Movement has its own permission and endpoint, so edit rights cannot bypass it.
+        dates = task_dates(data, task)
+        tags = task_tags(data, task)
+
         if 'column_id' in data and data['column_id'] != task['column_id']:
             abort(400, description='Use a ação de mover para alterar a coluna.')
-        db().execute('UPDATE tasks SET title=?,description=?,priority=?,updated_at=? WHERE id=?',
-                     (title, description, priority, now(), task_id))
-        before = {k: task[k] for k in ('title', 'description', 'priority')}
-        after = {'title': title, 'description': description, 'priority': priority}
+        db().execute('UPDATE tasks SET title=?,description=?,priority=?,task_date=?,desired_delivery=?,tags=?,updated_at=? WHERE id=?',
+                     (title, description, priority, dates['task_date'], dates['desired_delivery'], json.dumps(tags, ensure_ascii=False), now(), task_id))
+        before = {k: task[k] for k in ('title', 'description', 'priority', 'task_date', 'desired_delivery')}
+        before['tags'] = json.loads(task['tags'])
+        after = {'title': title, 'description': description, 'priority': priority, **dates, 'tags': tags}
         if before != after:
             audit('task.updated', 'task', task_id, title, board_id=task['board_id'],
                   task=lookup('tasks', task_id), previous=before, new=after)
@@ -1013,7 +1053,7 @@ def create_app(config=None):
         return jsonify(board=serialize_board(task['board_id']))
 
     def validate_file(filename, content):
-        # Never use a supplied path for storage or a download path.
+
         name = filename.replace('\\', '/').split('/')[-1]
         name = ''.join(ch for ch in name if ord(ch) >= 32 and ord(ch) != 127).strip()
         if not name or len(name) > 200 or '.' not in name:
@@ -1045,7 +1085,7 @@ def create_app(config=None):
             if b'\x00' in content:
                 abort(400, description='Arquivos TXT não podem conter dados binários.')
         if ext == 'dxf' and not content.startswith(b'AutoCAD Binary DXF\r\n\x1a\x00'):
-            # Validate ASCII DXF group-code structure without rewriting any bytes.
+
             lines = content.removeprefix(b'\xef\xbb\xbf').decode('latin-1').splitlines()
             while lines and not lines[-1].strip():
                 lines.pop()
@@ -1205,7 +1245,7 @@ def create_app(config=None):
     @app.get('/api/tasks/<task_id>/history')
     def task_history(task_id):
         need('view_task_history')
-        # No live-task lookup: histories remain readable after the task/account/board is deleted.
+
         return activity_results(task_id)
 
     @app.post('/api/import')
@@ -1214,7 +1254,7 @@ def create_app(config=None):
         need('manage_columns')
         need('create_tasks')
         data = body()
-        # Idempotency marker is scoped to this administrator and their particular browser snapshot.
+
         payload = data.get('board')
         if not isinstance(payload, dict):
             abort(400, description='Quadro do navegador inválido.')
@@ -1249,10 +1289,13 @@ def create_app(config=None):
             if not isinstance(task, dict) or task.get('status') not in mapping:
                 abort(400, description='A coluna da tarefa importada é inválida.')
             title, description, priority = task_values(task)
+            dates = task_dates(task)
+            tags = task_tags(task)
             task_id = uid()
-            db().execute('INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?,?)',
+            db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                          (task_id, board_id, mapping[task['status']], title, description, priority,
-                          pos, g.user['id'], now(), now()))
+                          pos, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery']))
+            db().execute('UPDATE tasks SET tags=? WHERE id=?', (json.dumps(tags, ensure_ascii=False), task_id))
             imported = lookup('tasks', task_id)
             audit('task.created', 'task', task_id, title, board_id=board_id, task=imported, new=task_snapshot(imported))
         db().execute('INSERT INTO metadata VALUES(?,?)', (marker, board_id))

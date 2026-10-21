@@ -48,7 +48,7 @@ class ActivityTests(unittest.TestCase):
         moved = next(e for e in history if e['action'] == 'task.moved')
         self.assertEqual(moved['previous']['column_name'], cols[0]['name'])
         self.assertEqual(moved['new']['column_name'], cols[1]['name'])
-        self.assertEqual(moved['actor_name'], 'Monke')
+        self.assertEqual(moved['actor_name'], 'Admin')
         self.assertIsNotNone(datetime.fromisoformat(moved['occurred_at']).tzinfo)
 
     def test_columns_boards_import_and_cascaded_file_deletion_are_logged(self):
@@ -77,7 +77,7 @@ class ActivityTests(unittest.TestCase):
                          'attachment.uploaded', 'attachment.deleted'} <= actions)
         entry = next(e for e in self.logs() if e['action'] == 'attachment.deleted')
         self.assertEqual(entry['previous']['filename'], 'cascade.txt')
-        self.assertEqual(entry['previous']['uploader'], 'Monke')
+        self.assertEqual(entry['previous']['uploader'], 'Admin')
         self.assertEqual(entry['board_name'], 'New board name')
 
     def test_user_roles_permissions_logs_have_no_credentials(self):
@@ -94,7 +94,7 @@ class ActivityTests(unittest.TestCase):
             'user.permissions_changed', 'user.deleted', 'user.password_reset'})
         changed = next(e for e in entries if e['action'] == 'user.permissions_changed')
         self.assertEqual(changed['new']['overrides'], {'view_activity_log': True})
-        self.assertEqual(changed['actor_name'], 'Monke')
+        self.assertEqual(changed['actor_name'], 'Admin')
         serialized = json.dumps(entries)
         for secret in ['temporary-password', 'reset-password-secret', 'password_hash', 'token_hash', 'csrf', '$argon2', self.csrf]:
             self.assertNotIn(secret, serialized)
@@ -269,6 +269,8 @@ class ActivityTests(unittest.TestCase):
             db.execute('DROP TABLE activity_log')
             for column in ['display_name','avatar','avatar_version','profile_version']:
                 db.execute('ALTER TABLE users DROP COLUMN '+column)
+            for field in ('task_date','desired_delivery','tags'):
+                db.execute('ALTER TABLE tasks DROP COLUMN '+field)
             db.execute('PRAGMA user_version=1')
             legacy = {'upload_attachments': False, 'delete_attachments': False,
                       'edit_tasks': False, 'view_boards': False, 'manage_users': True}
@@ -282,7 +284,7 @@ class ActivityTests(unittest.TestCase):
                 self.assertEqual(overrides[key], value)
             for key in ['download_attachments', 'assign_users', 'assign_self', 'delete_own_attachments']:
                 self.assertFalse(overrides[key])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 5)
             self.assertEqual(db.execute('SELECT content FROM attachments').fetchone()[0], b'preserve bytes')
             self.assertFalse(db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertEqual(self.board()['tasks'][0]['id'], task_id)
