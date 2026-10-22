@@ -78,7 +78,7 @@ class WindowsPackageTests(unittest.TestCase):
         stage=directory/'staging'
         from launcher import snapshot
         snapshot(self.package,stage)
-        target='.'.join([*VERSION.split('.')[:2],str(int(VERSION.split('.')[2])+1)])
+        target='.'.join([*VERSION.split('-')[0].split('.')[:2],str(int(VERSION.split('-')[0].split('.')[2])+1)])
         (stage/'VERSION').write_text(target)
         import hashlib
         files={p.relative_to(stage).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in stage.rglob('*') if p.is_file()}
