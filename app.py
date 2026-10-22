@@ -8,7 +8,6 @@ import re
 import secrets
 import sqlite3
 import time
-import zipfile
 import warnings
 import sys
 from datetime import datetime, timezone
@@ -70,7 +69,6 @@ ACTIVITY_ACTIONS = {
     'user.role_changed': 'Perfil alterado', 'user.permissions_changed': 'Permissões alteradas',
     'board.created': 'Quadro criado', 'board.updated': 'Quadro alterado', 'board.deleted': 'Quadro excluído',
 }
-EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'png', 'jpg', 'jpeg', 'zip', 'dxf'}
 PH = PasswordHasher(type=Type.ID, time_cost=3, memory_cost=65536, parallelism=4)
 
 DUMMY_HASH = PH.hash(secrets.token_urlsafe(32))
@@ -642,7 +640,7 @@ def create_app(config=None):
     @app.get('/api/config')
     def configuration():
         return jsonify(permissions=PERMISSIONS, roles=ROLES, max_file_bytes=app.config['MAX_FILE_BYTES'],
-                       extensions=sorted(EXTENSIONS), activity_actions=ACTIVITY_ACTIONS,
+                       extensions=[], allow_all_files=True, activity_actions=ACTIVITY_ACTIONS,
                        max_avatar_bytes=app.config['MAX_AVATAR_BYTES'])
 
     @app.get('/api/people')
@@ -1053,49 +1051,14 @@ def create_app(config=None):
         return jsonify(board=serialize_board(task['board_id']))
 
     def validate_file(filename, content):
-
         name = filename.replace('\\', '/').split('/')[-1]
         name = ''.join(ch for ch in name if ord(ch) >= 32 and ord(ch) != 127).strip()
-        if not name or len(name) > 200 or '.' not in name:
+        if not name or name in ('.', '..') or len(name) > 200:
             abort(400, description='Nome de arquivo inválido.')
-        ext = name.rsplit('.', 1)[1].lower()
-        if ext not in EXTENSIONS:
-            abort(400, description='Este formato de arquivo não é permitido.')
         if not content:
             abort(400, description='Não é possível enviar arquivos vazios.')
-        signatures = {'pdf': b'%PDF-', 'png': b'\x89PNG\r\n\x1a\n', 'jpg': b'\xff\xd8\xff',
-                      'jpeg': b'\xff\xd8\xff', 'doc': b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1',
-                      'xls': b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'}
-        if ext in signatures and not content.startswith(signatures[ext]):
-            abort(400, description='O conteúdo do arquivo não corresponde ao formato informado.')
-        if ext in ('docx', 'xlsx', 'zip'):
-            try:
-                with zipfile.ZipFile(io.BytesIO(content)) as archive:
-                    names = set(archive.namelist())
-                    required = 'word/document.xml' if ext == 'docx' else 'xl/workbook.xml'
-                    if ext != 'zip' and (required not in names or '[Content_Types].xml' not in names):
-                        abort(400, description='Documento do Office inválido.')
-            except (zipfile.BadZipFile, ValueError):
-                abort(400, description='Arquivo ZIP ou documento do Office inválido.')
-        if ext == 'txt':
-            try:
-                content.decode('utf-8-sig')
-            except UnicodeDecodeError:
-                abort(400, description='Arquivos TXT devem usar a codificação UTF-8.')
-            if b'\x00' in content:
-                abort(400, description='Arquivos TXT não podem conter dados binários.')
-        if ext == 'dxf' and not content.startswith(b'AutoCAD Binary DXF\r\n\x1a\x00'):
-
-            lines = content.removeprefix(b'\xef\xbb\xbf').decode('latin-1').splitlines()
-            while lines and not lines[-1].strip():
-                lines.pop()
-            if len(lines) < 4 or len(lines) % 2 or any(
-                    not re.fullmatch(r'\s*-?\d{1,4}\s*', lines[i]) for i in range(0, len(lines), 2)):
-                abort(400, description='A estrutura de códigos do arquivo DXF é inválida.')
-            if not any(lines[i].strip() == '0' and lines[i+1].strip() == 'EOF'
-                       for i in range(0, len(lines), 2)):
-                abort(400, description='O arquivo DXF não contém o marcador de fim de arquivo (EOF).')
-        return name, ext
+        ext = name.rsplit('.', 1)[1].lower() if '.' in name else ''
+        return name, ext or 'arquivo'
 
     @app.post('/api/tasks/<task_id>/attachments')
     def upload_attachment(task_id):

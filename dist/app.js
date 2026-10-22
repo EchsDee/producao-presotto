@@ -269,7 +269,7 @@ async function signedIn(result) {
   if (user.must_change_password) { showPassword(); return; }
   $('#password-screen').hidden = true;
   config = await api('/config');
-  $('#files').accept = config.extensions.map(ext => '.' + ext).join(',');
+  $('#files').removeAttribute('accept');
   if (can('view_boards')) await loadWorkspace();
   else {
     $('#workspace').hidden = $('#configuration-screen').hidden = $('#admin').hidden = true;
@@ -509,7 +509,7 @@ function scheduleAutosave() {
 function renderAttachments(task = board.tasks.find(t => t.id === editing)) {
   const list = $('#attachments'); list.replaceChildren();
   $('#attachment-hint').textContent = !task ? "Salve a tarefa para adicionar arquivos."
-    : "Até " + (config.max_file_bytes / 1024 / 1024) + " MB por arquivo.";
+    : "Todos os formatos. Até " + (config.max_file_bytes / 1024 / 1024) + " MB por arquivo.";
   $('#upload-form').hidden = !task || !can('upload_attachments');
   for (const attachment of task?.attachments || []) {
     const item = el('div', 'attachment'), link = el('a', '', attachment.filename);

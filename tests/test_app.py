@@ -276,18 +276,35 @@ class KanbanTests(unittest.TestCase):
 
     def test_file_validation_limits_and_atomic_batch_upload(self):
         task = self.task()
-        for filename, content in [('bad.exe', b'executable'), ('fake.pdf', b'not pdf'),
-                                  ('fake.dxf', b'not dxf'), ('empty.txt', b''), ('binary.txt', b'\x00')]:
+        for filename, content in [('empty.txt', b''), ('.', b'x'), ('..', b'x'), (' '*3, b'x')]:
             with self.subTest(filename=filename):
                 self.assertEqual(self.upload(task, filename, content).status_code, 400)
         self.assertEqual(self.upload(task, 'large.txt', b'x' * 4097).status_code, 413)
         board = self.board()
         response = self.client.post(f'/api/tasks/{task}/attachments', data={
-            'file': [(io.BytesIO(b'valid'), 'valid.txt'), (io.BytesIO(b'exe'), 'invalid.exe')]},
+            'file': [(io.BytesIO(b'valid'), 'valid.txt'), (io.BytesIO(b''), 'empty.bin')]},
             headers={'X-CSRF-Token': self.csrf, 'If-Match': str(board['version'])})
         self.assertEqual(response.status_code, 400)
         self.assertFalse(self.board()['tasks'][0]['attachments'])
         self.assertEqual(self.board()['version'], board['version'])
+
+    def test_arbitrary_attachments_preserve_bytes_and_download_as_files(self):
+        task = self.task()
+        self.assertTrue(self.client.get('/api/config').json['allow_all_files'])
+        files = {'drawing.DWG': b'AC1032\x00\xff\x80', 'archive.rar': b'Rar!\x1a\x07\x01\x00\xff',
+                 'project.dce': b'\x00\x80\xffDCE', 'part.step': b'ISO-10303-21;',
+                 'archive.7z': b'7z\xbc\xaf\x27\x1c', 'README': b'no extension',
+                 'binary.txt': b'\x00\xff\x80', 'program.exe': b'MZ\x00\xff',
+                 'unknown.custom': b'\x00\xff', 'file.pdf': b'opaque content'}
+        for filename, content in files.items():
+            with self.subTest(filename=filename):
+                result = self.upload(task, filename, content)
+                self.assertEqual(result.status_code, 201, result.json)
+                attachment = next(a for a in result.json['board']['tasks'][0]['attachments'] if a['filename']==filename)
+                response = self.client.get('/api/attachments/'+attachment['id']+'/download')
+                self.assertEqual(response.data, content)
+                self.assertEqual(response.mimetype, 'application/octet-stream')
+                self.assertTrue(response.headers['Content-Disposition'].startswith('attachment;'))
 
     def test_supported_file_formats_and_viewer_download_only(self):
         task = self.task()
