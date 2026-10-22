@@ -25,7 +25,7 @@ def main():
             page.goto(origin);page.wait_for_function('() => user && !pending');page.locator('#configuration-menu').click()
             expect(page.locator('#updates-panel')).to_be_visible()
             expect(page.locator('#admin')).to_be_hidden()
-            expect(page.locator('#update-status')).to_contain_text('1.0.1')
+            expect(page.locator('#update-status')).to_contain_text((Path(__file__).resolve().parents[1]/'VERSION').read_text().strip())
             page.locator('#update-settings summary').click()
             page.locator('#update-owner').fill('presotto');page.locator('#update-repository').fill('kanban')
             page.locator('#update-settings-form button').click()

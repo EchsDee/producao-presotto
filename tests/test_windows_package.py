@@ -68,15 +68,17 @@ class WindowsPackageTests(unittest.TestCase):
         self.control('start');self.login()
         boardid=self.api('/boards')['boards'][0]['id']
         board=self.api('/boards/'+boardid)['board']
+        self.api('/tags',{'name':'Portable'})
+        board=self.api('/boards/'+boardid)['board']
         self.api('/boards/'+boardid+'/tasks',{'version':board['version'],'column_id':board['columns'][0]['id'],'title':'Teste do pacote','tags':['Portable'],'desired_delivery':'2026-11-05'})
         self.control('stop');self.control('start')
-        self.assertEqual(self.api('/boards/'+boardid)['board']['tasks'][0]['tags'],['Portable'])
+        self.assertEqual(next(task for task in self.api('/boards/'+boardid)['board']['tasks'] if task['title']=='Teste do pacote')['tags'],['Portable'])
         self.control('start')
         directory=self.package/'data/updates'
         stage=directory/'staging'
         from launcher import snapshot
         snapshot(self.package,stage)
-        target='1.0.2'
+        target='.'.join([*VERSION.split('.')[:2],str(int(VERSION.split('.')[2])+1)])
         (stage/'VERSION').write_text(target)
         import hashlib
         files={p.relative_to(stage).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in stage.rglob('*') if p.is_file()}
@@ -90,7 +92,7 @@ class WindowsPackageTests(unittest.TestCase):
             except Exception:pass
             time.sleep(.2)
         else:self.fail('Embedded update failed')
-        self.assertEqual(self.api('/boards/'+boardid)['board']['tasks'][0]['tags'],['Portable'])
+        self.assertEqual(next(task for task in self.api('/boards/'+boardid)['board']['tasks'] if task['title']=='Teste do pacote')['tags'],['Portable'])
 
     def test_installer_and_reinstall_keep_existing_database(self):
         target=self.base/'installed application'
