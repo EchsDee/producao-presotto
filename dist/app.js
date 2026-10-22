@@ -1,5 +1,83 @@
 'use strict';
 let updateInfo = null, updateWatching = false;
+let tagRegistry = [], selectedTaskTags = new Set(), tagFilters = new Set(), editingTag = null;
+function hasTagManagement() { return ['create_tags','edit_tags','delete_tags','manage_tag_status'].some(can); }
+function hasAdminAccess() { return can('manage_users') || can('manage_permissions') || hasTagManagement(); }
+function tagChip(tag) {
+  const chip = el('span','task-tag',tag.name);
+  chip.style.backgroundColor = tag.color;
+  const rgb = [1,3,5].map(i=>parseInt(tag.color.slice(i,i+2),16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4);
+  chip.style.color = rgb.reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0)>.179?'#111126':'#ffffff';
+  return chip;
+}
+async function loadTags() {
+  tagRegistry = can('view_tags') || hasTagManagement() ? (await api('/tags')).tags : [];
+}
+function renderTagFilters() {
+  $('#tag-filter-panel').hidden = !can('view_tags');
+  const list = $('#tag-filters'); list.replaceChildren();
+  tagFilters = new Set([...tagFilters].filter(id=>tagRegistry.some(tag=>tag.id===id)));
+  for (const tag of tagRegistry) {
+    const label=el('label','tag-option'),input=el('input'); input.type='checkbox';input.checked=tagFilters.has(tag.id);
+    input.onchange=()=>{input.checked?tagFilters.add(tag.id):tagFilters.delete(tag.id);render();};
+    label.append(input,tagChip(tag));list.append(label);
+  }
+  if (!tagRegistry.length) list.append(el('p','field-hint','Nenhuma tag cadastrada.'));
+}
+function renderTaskTags() {
+  $('#task-tag-section').hidden = !can('view_tags');
+  const list=$('#task-tag-options'),query=$('#task-tag-search').value.toLocaleLowerCase('pt-BR');list.replaceChildren();
+  for(const tag of tagRegistry.filter(t=>(t.active||selectedTaskTags.has(t.id))&&t.name.toLocaleLowerCase('pt-BR').includes(query))) {
+    const label=el('label','tag-option'),input=el('input');input.type='checkbox';input.value=tag.id;input.checked=selectedTaskTags.has(tag.id);
+    input.disabled=input.checked?!can('remove_tags'):!can('assign_tags')||!tag.active;
+    if(!editing&&!can('create_tasks'))input.disabled=true;
+    input.onchange=()=>{
+      const checked=input.checked;
+      if(!editing){checked?selectedTaskTags.add(tag.id):selectedTaskTags.delete(tag.id);renderTaskTags();return;}
+      input.disabled=true;
+      queueTaskAction(async()=>{
+        const desired=new Set(board.tasks.find(t=>t.id===editing)?.tag_ids||[]);
+        checked?desired.add(tag.id):desired.delete(tag.id);
+        try {
+          await mutate('/tasks/'+editing+'/tags','PATCH',{tag_ids:[...desired]},taskVersion);
+          taskVersion=board.version;selectedTaskTags=new Set(board.tasks.find(t=>t.id===editing)?.tag_ids||[]);
+          if(can('view_task_history'))await loadHistory(editing,'task-history');
+        } finally {renderTaskTags();}
+      });
+    };
+    label.append(input,tagChip(tag));if(!tag.active)label.append(el('small','field-hint','Inativa'));list.append(label);
+  }
+  if(!list.children.length)list.append(el('p','field-hint','Nenhuma tag disponível.'));
+}
+function openTag(tag=null) {
+  editingTag=tag;cleanDialog($('#tag-dialog'));
+  $('#tag-form-title').textContent=tag?'Editar tag':'Nova tag';
+  $('#tag-name').value=tag?.name||'';$('#tag-color').value=tag?.color||'#475569';
+  $('#tag-description').value=tag?.description||'';$('#tag-active').checked=tag?tag.active:true;
+  for(const id of ['tag-name','tag-color','tag-description'])$('#'+id).disabled=tag?!can('edit_tags'):!can('create_tags');
+  $('#tag-active').disabled=!can('manage_tag_status');$('#tag-dialog').showModal();
+}
+function renderTagManagement() {
+  const list=$('#tag-list');list.replaceChildren();
+  const query=$('#tag-search').value.toLocaleLowerCase('pt-BR'),status=$('#tag-status-filter').value;
+  for(const tag of tagRegistry.filter(t=>(t.name+' '+t.description).toLocaleLowerCase('pt-BR').includes(query)&&(!status||t.active===(status==='active')))) {
+    const row=el('tr'),name=el('td');name.append(tagChip(tag));row.append(name,el('td','',tag.description),el('td','',tag.active?'Ativa':'Inativa'),el('td','',tag.task_count),el('td','',tag.creator_name+' · '+new Date(tag.created_at).toLocaleString('pt-BR')));
+    const actions=el('td','tag-actions');
+    if(can('edit_tags')||can('manage_tag_status'))actions.append(button('Editar',()=>openTag(tag),'secondary'));
+    if(can('delete_tags'))actions.append(button('Excluir',async()=>{
+      if(!confirm('Excluir a tag "'+tag.name+'"? Ela está em '+tag.task_count+' tarefa(s). As tarefas serão mantidas. Para manter as associações, prefira desativar a tag.'))return;
+      await api('/tags/'+tag.id,{method:'DELETE',data:{version:tag.version}});await loadTags();renderTagManagement();message('Tag excluída.');
+    },'secondary danger'));
+    row.append(actions);list.append(row);
+  }
+  if(!list.children.length){const row=el('tr'),cell=el('td','field-hint','Nenhuma tag encontrada.');cell.colSpan=6;row.append(cell);list.append(row);}
+}
+async function showTagManagement() {
+  if(!hasTagManagement())throw new Error('Você não tem acesso ao cadastro de tags.');
+  await loadTags();$('#tag-management').hidden=false;$('#users-list').hidden=true;$('#new-user').hidden=true;
+  $('#new-tag').hidden=!can('create_tags');
+  renderTagManagement();
+}
 function hasUpdateAccess() { return ['view_update_status','check_updates','download_updates','install_updates','manage_update_settings','view_update_history'].some(can); }
 function hasConfigurationAccess() { return user?.role === 'Administrator' || hasUpdateAccess(); }
 async function loadUpdates() {
@@ -242,6 +320,7 @@ function showLogin() {
   closeProfileMenu(); releaseAvatarPreview();
   if (savedTheme) applyTheme(savedTheme.colors);
   user = null; csrf = ''; board = null; boards = []; people = []; users = [];
+  tagRegistry=[];tagFilters.clear();selectedTaskTags.clear();
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
   for (const id of ['workspace', 'admin', 'configuration-screen', 'activity-screen', 'password-screen', 'account']) $('#' + id).hidden = true;
   $('#activity-list').replaceChildren(); $('#task-history').replaceChildren(); $('#standalone-history').replaceChildren();
@@ -264,7 +343,7 @@ async function signedIn(result) {
   $('#login-screen').hidden = true; $('#account').hidden = false;
   renderIdentity();
   $('#board-menu').hidden = !can('view_boards') || user.must_change_password;
-  $('#settings').hidden = (!can('manage_users') && !can('manage_permissions')) || user.must_change_password;
+  $('#settings').hidden = !hasAdminAccess() || user.must_change_password;
   $('#configuration-menu').hidden = !hasConfigurationAccess() || user.must_change_password;
   $('#activity-menu').hidden = !can('view_activity_log') || user.must_change_password;
   if (user.must_change_password) { showPassword(); return; }
@@ -274,7 +353,7 @@ async function signedIn(result) {
   if (can('view_boards')) await loadWorkspace();
   else {
     $('#workspace').hidden = $('#configuration-screen').hidden = $('#admin').hidden = true;
-    if (can('manage_users') || can('manage_permissions')) await showAdmin();
+    if (hasAdminAccess()) await showAdmin();
     else if (hasConfigurationAccess()) await showConfiguration();
     else if (can('view_activity_log')) await showActivity();
     else message("Sua conta não tem acesso aos quadros. Solicite a liberação a um administrador.");
@@ -286,6 +365,7 @@ async function loadWorkspace(preferred) {
   const list = await api('/boards');
   const directory = await api('/people');
   boards = list.boards; people = directory.users;
+  await loadTags();renderTagFilters();
   const id = boards.find(b => b.id === (preferred || board?.id))?.id || boards[0]?.id;
   board = id ? (await api('/boards/' + id)).board : null;
   $('#workspace').hidden = false; $('#admin').hidden = $('#configuration-screen').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true;
@@ -316,7 +396,8 @@ function render() {
     col.setAttribute('aria-label', displayName(column.name));
     const list = board.tasks.filter(t => t.column_id === column.id &&
       (t.title + ' ' + t.description + ' ' + (t.tags || []).join(' ')).toLowerCase().includes(query) &&
-      (!onlyMine || t.assigned_to_me) && (!selectedAssignee || t.assignees.includes(selectedAssignee)));
+      (!onlyMine || t.assigned_to_me) && (!selectedAssignee || t.assignees.includes(selectedAssignee)) &&
+      (!can('view_tags') || [...tagFilters].every(id=>(t.tag_ids||[]).includes(id))));
     const head = el('div', 'column-head'), heading = el('span', '', displayName(column.name));
     heading.append(el('span', 'type-label', {todo: "Início", doing: "Em andamento", done: "Concluído"}[column.type]));
     head.append(el('span', 'dot'), heading, el('span', 'count', list.length));
@@ -362,7 +443,7 @@ function render() {
       if (task.description) card.append(el('p', '', task.description));
       if(task.tags?.length) {
         const tags=el('div','task-tags');
-        for(const tag of task.tags) tags.append(el('span','task-tag',tag));
+        for(const tag of task.tag_details || []) tags.append(tagChip(tag));
         card.append(tags);
       }
       for (const [field,label] of [['task_date','Data'],['desired_delivery','Entrega desejada']]) {
@@ -413,12 +494,12 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   const today = new Date();
   $('#task-date').value = task ? task.task_date || '' : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
   $('#desired-delivery').value = task?.desired_delivery || '';
-  $('#task-tags').value = (task?.tags || []).join(', ');
+  selectedTaskTags = new Set(task?.tag_ids || []);$('#task-tag-search').value='';renderTaskTags();
   options($('#status'), board.columns.map(c => [c.id, displayName(c.name)]), task?.column_id || status);
   $('#status').disabled = !!task || !can('create_tasks');
   syncAssignments(task);
   const editable = task ? can('edit_tasks') : can('create_tasks');
-  for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'task-tags']) $('#' + id).disabled = !editable;
+  for (const id of ['title', 'description', 'task-date', 'desired-delivery']) $('#' + id).disabled = !editable;
   $('#save-task').hidden = !editable;
   savedTaskFields = JSON.stringify(taskFields());
   $('#files').value = ''; renderPendingFiles();
@@ -429,7 +510,8 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   else if (can('view_task_history')) $('#task-history').append(el('p', 'field-hint', "Salve a tarefa para iniciar seu histórico."));
 }
 function taskFields() {
-  const data = {title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value || null, tags: [...new Map($('#task-tags').value.split(',').map(tag=>tag.trim()).filter(Boolean).map(tag=>[tag.toLocaleLowerCase('pt-BR'),tag])).values()]};
+  const data = {title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value || null};
+  if(!editing && can('view_tags'))data.tag_ids=[...selectedTaskTags];
   if (!editing && (can('assign_users') || can('assign_self'))) {
     data.assignees = can('view_task_assignees')
       ? [...$('#assignees').selectedOptions].map(option => option.value)
@@ -589,12 +671,16 @@ function openBoard(rename = false) {
   $('#board-name').value = rename ? board.name : ''; $('#board-dialog').showModal();
 }
 async function showAdmin() {
-  if (!can('manage_users') && !can('manage_permissions')) throw new Error('Você não tem acesso à administração.');
+  if (!hasAdminAccess()) throw new Error('Você não tem acesso à administração.');
   if (savedTheme) applyTheme(savedTheme.colors);
-  users = (await api('/users')).users;
+  const canUsers=can('manage_users')||can('manage_permissions');
+  users = canUsers ? (await api('/users')).users : [];
   $('#workspace').hidden = $('#configuration-screen').hidden = $('#password-screen').hidden = $('#activity-screen').hidden = true; $('#admin').hidden = false;
   $('#back-board').hidden = !can('view_boards');
   $('#new-user').hidden = !can('manage_users');
+  $('#admin-users-tab').hidden=!canUsers;$('#admin-tags-tab').hidden=!hasTagManagement();
+  $('#tag-management').hidden=true;$('#users-list').hidden=false;
+  if(!canUsers){await showTagManagement();return;}
   const list = $('#users-list'); list.replaceChildren();
   for (const account of users) {
     const row = el('div', 'user-row'), text = el('div');
@@ -620,7 +706,7 @@ function drawPermissions(role, overrides = {}) {
   const list = $('#permissions'); list.replaceChildren();
   const groups = new Map();
   const category = key => key.includes('update') ? 'Atualizações' : ['manage_users','manage_permissions'].includes(key) ? 'Administração'
-    : key.includes('attachments') ? 'Arquivos' : ['view_activity_log','view_task_history'].includes(key) ? 'Histórico e atividades'
+    : key.includes('tag') ? 'Tags' : key.includes('attachments') ? 'Arquivos' : ['view_activity_log','view_task_history'].includes(key) ? 'Histórico e atividades'
     : key.includes('boards') || key.includes('columns') ? 'Quadros e colunas' : 'Tarefas e responsáveis';
   for (const [key, description] of Object.entries(config.permissions)) {
     const group = category(key);
@@ -655,6 +741,8 @@ function activityText(entry) {
   const name = '“' + (entry.entity_display_name || entry.entity_name) + '”', before = entry.previous, after = entry.new;
   const actorName = entry.actor_display_name || entry.actor_name;
   const verbs = {
+    'tag.created':'cadastrou a tag', 'tag.updated':'alterou a tag', 'tag.deleted':'excluiu a tag',
+    'tag.activated':'ativou a tag', 'tag.deactivated':'desativou a tag',
     'update.configured':'configurou as atualizações de', 'update.checked':'verificou atualizações de',
     'update.downloaded':'baixou uma atualização de', 'update.install_requested':'autorizou a atualização de',
     'update.rollback_requested':'autorizou a restauração de', 'update.installed':'atualizou',
@@ -674,6 +762,8 @@ function activityText(entry) {
     " de “" + displayName(before.column_name) + "” (posição " + (before.position + 1) + ") para “" + displayName(after.column_name) + "” (posição " + (after.position + 1) + ').';
   if (entry.action === 'task.assigned') return actorName + " atribuiu o usuário “" + (after.display_name || after.username) + "” à tarefa " + name + '.';
   if (entry.action === 'task.unassigned') return actorName + " removeu o usuário “" + (before.display_name || before.username) + "” da tarefa " + name + '.';
+  if (entry.action === 'task.tag_added') return actorName + ' adicionou a tag “' + after.name + '” à tarefa ' + name + '.';
+  if (entry.action === 'task.tag_removed') return actorName + ' removeu a tag “' + before.name + '” da tarefa ' + name + '.';
   return actorName + ' ' + (verbs[entry.action] || entry.action) + ' ' + name + '.';
 }
 function appendActivity(container, entries, allowHistory = false) {
@@ -812,6 +902,20 @@ $('#password-form').onsubmit = event => { event.preventDefault(); run(async () =
 }); };
 $('#board-menu').onclick = () => run(() => loadWorkspace());
 $('#settings').onclick = () => run(showAdmin);
+$('#admin-users-tab').onclick=()=>run(showAdmin);
+$('#admin-tags-tab').onclick=()=>run(showTagManagement);
+$('#new-tag').onclick=()=>openTag();
+$('#tag-cancel').onclick=()=>$('#tag-dialog').close();
+$('#tag-search').oninput=renderTagManagement;
+$('#tag-status-filter').onchange=renderTagManagement;
+$('#task-tag-search').oninput=renderTaskTags;
+$('#clear-tag-filters').onclick=()=>{tagFilters.clear();renderTagFilters();render();};
+$('#tag-form').onsubmit=event=>{event.preventDefault();run(async()=>{
+  const data={name:$('#tag-name').value.trim(),color:$('#tag-color').value,description:$('#tag-description').value,active:$('#tag-active').checked};
+  if(editingTag)data.version=editingTag.version;
+  await api('/tags'+(editingTag?'/'+editingTag.id:''),{method:editingTag?'PATCH':'POST',data});
+  $('#tag-dialog').close();await loadTags();renderTagManagement();message('Tag salva.');
+});};
 $('#configuration-menu').onclick = () => run(showConfiguration);
 $('#configuration-back').onclick = () => run(() => loadWorkspace());
 for (const key of Object.keys(THEME_DEFAULTS)) $('#theme-'+key).oninput = previewTheme;
@@ -871,7 +975,7 @@ async function closeTask() {
 }
 $('#cancel').onclick = () => run(closeTask);
 $('#dialog').addEventListener('cancel', event => { event.preventDefault(); run(closeTask); });
-for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'task-tags']) {
+for (const id of ['title', 'description', 'task-date', 'desired-delivery']) {
   $('#' + id).addEventListener('input', scheduleAutosave);
   $('#' + id).addEventListener('change', scheduleAutosave);
 }
@@ -971,6 +1075,8 @@ setInterval(() => {
     const directory = (await api('/people')).users;
     const identitiesChanged = JSON.stringify(directory)!==JSON.stringify(people);
     people=directory;
+    const oldTags=JSON.stringify(tagRegistry);await loadTags();
+    if(oldTags!==JSON.stringify(tagRegistry)){renderTagFilters();render();}
     const current = list.find(b => b.id === board.id);
     if (!current || current.version !== board.version || JSON.stringify(list) !== JSON.stringify(boards)) await loadWorkspace();
     else if(identitiesChanged) {

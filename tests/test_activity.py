@@ -271,6 +271,8 @@ class ActivityTests(unittest.TestCase):
                 db.execute('ALTER TABLE users DROP COLUMN '+column)
             for field in ('task_date','desired_delivery','tags'):
                 db.execute('ALTER TABLE tasks DROP COLUMN '+field)
+            db.execute('DROP TABLE task_tags')
+            db.execute('DROP TABLE tags')
             db.execute('PRAGMA user_version=1')
             legacy = {'upload_attachments': False, 'delete_attachments': False,
                       'edit_tasks': False, 'view_boards': False, 'manage_users': True}
@@ -284,7 +286,7 @@ class ActivityTests(unittest.TestCase):
                 self.assertEqual(overrides[key], value)
             for key in ['download_attachments', 'assign_users', 'assign_self', 'delete_own_attachments']:
                 self.assertFalse(overrides[key])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 5)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 6)
             self.assertEqual(db.execute('SELECT content FROM attachments').fetchone()[0], b'preserve bytes')
             self.assertFalse(db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertEqual(self.board()['tasks'][0]['id'], task_id)

@@ -138,7 +138,7 @@ class LauncherTests(unittest.TestCase):
     def test_failed_migration_recovers_previous_schema(self):
         self.configure();self.bundle()
         source=Path(self.temp.name)/'source'
-        (source/'migrations/006_broken.sql').write_text('CREATE TABLE must_rollback(id INTEGER); INSERT INTO missing_table VALUES(1);')
+        (source/'migrations/007_broken.sql').write_text('CREATE TABLE must_rollback(id INTEGER); INSERT INTO missing_table VALUES(1);')
         from build_release import build
         build(source,Path(self.temp.name)/'migration.zip')
         self.download((Path(self.temp.name)/'migration.zip').read_bytes());self.boot()
@@ -147,7 +147,7 @@ class LauncherTests(unittest.TestCase):
         self.wait_for(lambda:len(read(self.directory/'history.json',[]))==1 and not (self.directory/'job.json').exists())
         self.assertEqual(self.http('/health',health=True)['version'],'1.0.1')
         with closing(sqlite3.connect(self.path)) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],5)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],6)
             self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='must_rollback'").fetchone())
 
 

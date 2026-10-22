@@ -86,7 +86,7 @@ class KanbanTests(unittest.TestCase):
         create_app(self.config)
         with closing(connect(self.path)) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM users').fetchone()[0], 0)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 5)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 6)
 
     def test_login_logout_cookie_and_csrf(self):
         self.assertEqual(self.app.test_client().get('/api/boards').status_code, 401)

@@ -37,6 +37,10 @@ PERMISSIONS = {
     'view_activity_log': 'Visualizar registro de atividades', 'view_task_history': 'Visualizar histórico das tarefas',
     'manage_users': 'Criar, editar, desativar e excluir usuários; redefinir senhas',
     'manage_permissions': 'Definir perfis e configurar permissões individuais',
+    'view_tags': 'Visualizar tags', 'assign_tags': 'Adicionar tags às tarefas',
+    'remove_tags': 'Remover tags das tarefas', 'create_tags': 'Cadastrar tags',
+    'edit_tags': 'Editar tags', 'delete_tags': 'Excluir tags',
+    'manage_tag_status': 'Ativar e desativar tags',
 }
 PERMISSIONS.update(updater.PERMISSIONS)
 ROLES = {
@@ -44,13 +48,16 @@ ROLES = {
     'Manager': ['view_boards', 'create_tasks', 'edit_tasks', 'move_tasks', 'delete_tasks',
                 'manage_columns', 'delete_columns', 'upload_attachments', 'download_attachments',
                 'delete_attachments', 'delete_own_attachments', 'assign_users', 'assign_self',
-                'view_task_assignees', 'view_activity_log', 'view_task_history'],
+                'view_task_assignees', 'view_activity_log', 'view_task_history', 'view_tags', 'assign_tags', 'remove_tags'],
     'Member': ['view_boards', 'create_tasks', 'edit_tasks', 'move_tasks', 'upload_attachments',
                'download_attachments', 'delete_own_attachments', 'assign_self',
-               'view_task_assignees', 'view_task_history'],
-    'Viewer': ['view_boards', 'download_attachments', 'view_task_assignees', 'view_task_history'],
+               'view_task_assignees', 'view_task_history', 'view_tags', 'assign_tags', 'remove_tags'],
+    'Viewer': ['view_boards', 'download_attachments', 'view_task_assignees', 'view_task_history', 'view_tags'],
 }
 ACTIVITY_ACTIONS = {
+    'tag.created': 'Tag cadastrada', 'tag.updated': 'Tag alterada', 'tag.deleted': 'Tag excluída',
+    'tag.activated': 'Tag ativada', 'tag.deactivated': 'Tag desativada',
+    'task.tag_added': 'Tag adicionada à tarefa', 'task.tag_removed': 'Tag removida da tarefa',
     **{'update.' + key: value for key, value in {
         'configured': 'Atualizações configuradas', 'checked': 'Atualizações verificadas',
         'downloaded': 'Atualização baixada', 'install_requested': 'Instalação autorizada',
@@ -147,6 +154,18 @@ def initialize(path):
                     if overrides != json.loads(user['permissions']):
                         db.execute('UPDATE users SET permissions=?,version=version+1 WHERE id=?',
                                    (json.dumps(overrides), user['id']))
+            if migration.name.startswith('006_'):
+                for task in db.execute('SELECT id,tags,created_at,created_by FROM tasks ORDER BY created_at,id').fetchall():
+                    for name in json.loads(task['tags']):
+                        name = name.strip()
+                        key = name.casefold()
+                        tag = db.execute('SELECT id FROM tags WHERE name_key=?', (key,)).fetchone()
+                        tag_id = tag['id'] if tag else uid()
+                        if not tag:
+                            creator = db.execute('SELECT username FROM users WHERE id=?', (task['created_by'],)).fetchone()
+                            db.execute('INSERT INTO tags(id,name,name_key,created_by,creator_name,created_at) VALUES(?,?,?,?,?,?)',
+                                       (tag_id, name, key, task['created_by'], creator[0] if creator else 'Usuário excluído', task['created_at']))
+                        db.execute('INSERT OR IGNORE INTO task_tags VALUES(?,?)', (task['id'], tag_id))
             db.execute(f'PRAGMA user_version={int(migration.name.split("_")[0])}')
         if not db.execute("SELECT 1 FROM metadata WHERE key='initialized'").fetchone():
             admin_id = uid()
@@ -255,7 +274,7 @@ def create_app(config=None):
 
     def task_snapshot(task):
         col = lookup('columns', task['column_id'])
-        return {**{k: task[k] for k in ('title', 'description', 'priority', 'column_id', 'position', 'task_date', 'desired_delivery')}, 'tags': json.loads(task['tags']),
+        return {**{k: task[k] for k in ('title', 'description', 'priority', 'column_id', 'position', 'task_date', 'desired_delivery')}, 'tags': [t['name'] for t in registered_task_tags(task['id'])],
                 'column_name': col['name']}
 
     def file_snapshot(attachment):
@@ -317,7 +336,10 @@ def create_app(config=None):
         tasks = [dict(t) for t in db().execute(
             'SELECT * FROM tasks WHERE board_id=? ORDER BY position,id', (board_id,))]
         for task in tasks:
-            task['tags'] = json.loads(task['tags'])
+            details = registered_task_tags(task['id']) if 'view_tags' in effective(g.user) else []
+            task['tag_details'] = details
+            task['tag_ids'] = [t['id'] for t in details]
+            task['tags'] = [t['name'] for t in details]
             assignees = [r[0] for r in db().execute(
                 'SELECT user_id FROM task_assignees WHERE task_id=? ORDER BY user_id', (task['id'],))]
             task['assigned_to_me'] = g.user['id'] in assignees
@@ -918,21 +940,137 @@ def create_app(config=None):
             abort(400, description='Prioridade inválida.')
         return title, description, priority
 
+    def registered_task_tags(task_id):
+        return [dict(row) for row in db().execute(
+            'SELECT t.id,t.name,t.color,t.active FROM tags t JOIN task_tags a ON a.tag_id=t.id '
+            'WHERE a.task_id=? ORDER BY t.name_key,t.id', (task_id,))]
+
     def task_tags(data, existing=None):
-        if 'tags' not in data:
-            return json.loads(existing['tags']) if existing is not None else []
-        values = data['tags']
-        if not isinstance(values, list) or len(values) > 20:
-            abort(400, description='Informe no máximo 20 tags por tarefa.')
-        tags, seen = [], set()
+        current = {t['id'] for t in registered_task_tags(existing['id'])} if existing is not None else set()
+        if 'tag_ids' not in data and 'tags' not in data:
+            return current
+        values = data.get('tag_ids', data.get('tags'))
+        if not isinstance(values, list) or len(values) > 20 or any(not isinstance(v, str) for v in values):
+            abort(400, description='Informe no máximo 20 tags cadastradas por tarefa.')
+        desired = set()
         for value in values:
-            if not isinstance(value, str) or not 1 <= len(value.strip()) <= 40 or any(ord(c) < 32 or ord(c) == 127 for c in value) or ',' in value:
-                abort(400, description='Cada tag deve ter entre 1 e 40 caracteres, sem vírgulas ou quebras de linha.')
-            value = value.strip()
-            if value.casefold() not in seen:
-                tags.append(value)
-                seen.add(value.casefold())
-        return tags
+            tag = db().execute('SELECT * FROM tags WHERE ' + ('id' if 'tag_ids' in data else 'name_key') + '=?',
+                               (value if 'tag_ids' in data else value.strip().casefold(),)).fetchone()
+            if not tag:
+                abort(400, description='Selecione apenas tags já cadastradas.')
+            if tag['id'] not in current and not tag['active']:
+                abort(400, description='Não é possível atribuir uma tag inativa.')
+            desired.add(tag['id'])
+        if desired - current:
+            need('assign_tags')
+        if current - desired:
+            need('remove_tags')
+        return desired
+
+    def save_task_tags(task, desired):
+        current = {t['id'] for t in registered_task_tags(task['id'])}
+        for tag_id in sorted(current ^ desired):
+            tag = lookup('tags', tag_id)
+            values = {'tag_id': tag_id, 'name': tag['name'], 'color': tag['color']}
+            added = tag_id in desired
+            if added:
+                db().execute('INSERT INTO task_tags VALUES(?,?)', (task['id'], tag_id))
+            else:
+                db().execute('DELETE FROM task_tags WHERE task_id=? AND tag_id=?', (task['id'], tag_id))
+            audit('task.tag_added' if added else 'task.tag_removed', 'task', task['id'], task['title'],
+                  board_id=task['board_id'], task=task, previous=None if added else values, new=values if added else None)
+
+    @app.patch('/api/tasks/<task_id>/tags')
+    def update_task_tags(task_id):
+        if not {'assign_tags', 'remove_tags'} & set(effective(g.user)):
+            abort(403)
+        data = body()
+        task = lookup('tasks', task_id)
+        board_write(task['board_id'], data)
+        save_task_tags(task, task_tags(data, task))
+        touch(task['board_id'])
+        return jsonify(board=serialize_board(task['board_id']))
+
+    def tag_public(tag):
+        value = dict(tag)
+        value.pop('name_key', None)
+        value['active'] = bool(value['active'])
+        value['task_count'] = db().execute('SELECT COUNT(*) FROM task_tags WHERE tag_id=?', (tag['id'],)).fetchone()[0]
+        return value
+
+    @app.get('/api/tags')
+    def list_tags():
+        if not {'view_tags', 'create_tags', 'edit_tags', 'delete_tags', 'manage_tag_status'} & set(effective(g.user)):
+            abort(403)
+        return jsonify(tags=[tag_public(t) for t in db().execute('SELECT * FROM tags ORDER BY name_key,id')])
+
+    def tag_values(data, existing=None):
+        base = dict(existing) if existing else {'name': '', 'color': '#475569', 'description': '', 'active': True}
+        base['active'] = bool(base['active'])
+        values = {k: data.get(k, base[k]) for k in ('name', 'color', 'description', 'active')}
+        name = text(values, 'name', 40)
+        if any(ord(c) < 32 or ord(c) == 127 for c in name) or ',' in name:
+            abort(400, description='Nome de tag inválido.')
+        description = text(values, 'description', 2000, False)
+        if not isinstance(values['color'], str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', values['color']):
+            abort(400, description='Cor de tag inválida.')
+        if type(values['active']) is not bool:
+            abort(400, description='Status de tag inválido.')
+        duplicate = db().execute('SELECT id FROM tags WHERE name_key=?', (name.casefold(),)).fetchone()
+        if duplicate and (not existing or duplicate['id'] != existing['id']):
+            abort(409, description='Já existe uma tag com este nome.')
+        return {'name': name, 'color': values['color'].lower(), 'description': description, 'active': values['active']}
+
+    @app.post('/api/tags')
+    def create_tag():
+        need('create_tags')
+        values = tag_values(body())
+        if not values['active']:
+            need('manage_tag_status')
+        tag_id = uid()
+        db().execute('INSERT INTO tags(id,name,name_key,color,description,active,created_by,creator_name,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                     (tag_id, values['name'], values['name'].casefold(), values['color'], values['description'], values['active'], g.user['id'], g.user['username'], now()))
+        audit('tag.created', 'tag', tag_id, values['name'], new=values)
+        return jsonify(tag=tag_public(lookup('tags', tag_id))), 201
+
+    @app.patch('/api/tags/<tag_id>')
+    def edit_tag(tag_id):
+        data = body()
+        tag = lookup('tags', tag_id)
+        expected(data, tag)
+        values = tag_values(data, tag)
+        previous = {k: tag[k] for k in values}
+        if any(values[k] != tag[k] for k in ('name', 'color', 'description')):
+            need('edit_tags')
+        if values['active'] != bool(tag['active']):
+            need('manage_tag_status')
+        if not {'edit_tags', 'manage_tag_status'} & set(effective(g.user)):
+            abort(403)
+        db().execute('UPDATE tags SET name=?,name_key=?,color=?,description=?,active=?,version=version+1 WHERE id=?',
+                     (values['name'], values['name'].casefold(), values['color'], values['description'], values['active'], tag_id))
+        if any(values[k] != tag[k] for k in ('name', 'color', 'description')):
+            audit('tag.updated', 'tag', tag_id, values['name'], previous=previous, new=values)
+        if values['active'] != bool(tag['active']):
+            audit('tag.activated' if values['active'] else 'tag.deactivated', 'tag', tag_id, values['name'], previous=previous, new=values)
+        touch_tag_boards(tag_id)
+        return jsonify(tag=tag_public(lookup('tags', tag_id)))
+
+    def touch_tag_boards(tag_id):
+        for row in db().execute('SELECT DISTINCT t.board_id FROM tasks t JOIN task_tags a ON a.task_id=t.id WHERE a.tag_id=?', (tag_id,)).fetchall():
+            touch(row['board_id'])
+
+    @app.delete('/api/tags/<tag_id>')
+    def delete_tag(tag_id):
+        need('delete_tags')
+        tag = lookup('tags', tag_id)
+        expected(body(), tag)
+        for row in db().execute('SELECT t.* FROM tasks t JOIN task_tags a ON a.task_id=t.id WHERE a.tag_id=?', (tag_id,)).fetchall():
+            audit('task.tag_removed', 'task', row['id'], row['title'], board_id=row['board_id'], task=row,
+                  previous={'tag_id': tag_id, 'name': tag['name'], 'color': tag['color'], 'reason': 'tag_deleted'})
+        audit('tag.deleted', 'tag', tag_id, tag['name'], previous=tag_public(tag))
+        touch_tag_boards(tag_id)
+        db().execute('DELETE FROM tags WHERE id=?', (tag_id,))
+        return jsonify(ok=True)
 
     def task_dates(data, existing=None):
         dates = {}
@@ -964,8 +1102,8 @@ def create_app(config=None):
         task_id = uid()
         db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                      (task_id, board_id, column_id, title, description, priority, position, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery']))
-        db().execute('UPDATE tasks SET tags=? WHERE id=?', (json.dumps(tags, ensure_ascii=False), task_id))
         task = lookup('tasks', task_id)
+        save_task_tags(task, tags)
         audit('task.created', 'task', task_id, title, board_id=board_id, task=task, new=task_snapshot(task))
         assign(task_id, data)
         touch(board_id)
@@ -983,11 +1121,11 @@ def create_app(config=None):
 
         if 'column_id' in data and data['column_id'] != task['column_id']:
             abort(400, description='Use a ação de mover para alterar a coluna.')
-        db().execute('UPDATE tasks SET title=?,description=?,priority=?,task_date=?,desired_delivery=?,tags=?,updated_at=? WHERE id=?',
-                     (title, description, priority, dates['task_date'], dates['desired_delivery'], json.dumps(tags, ensure_ascii=False), now(), task_id))
+        db().execute('UPDATE tasks SET title=?,description=?,priority=?,task_date=?,desired_delivery=?,updated_at=? WHERE id=?',
+                     (title, description, priority, dates['task_date'], dates['desired_delivery'], now(), task_id))
         before = {k: task[k] for k in ('title', 'description', 'priority', 'task_date', 'desired_delivery')}
-        before['tags'] = json.loads(task['tags'])
-        after = {'title': title, 'description': description, 'priority': priority, **dates, 'tags': tags}
+        save_task_tags(lookup('tasks', task_id), tags)
+        after = {'title': title, 'description': description, 'priority': priority, **dates}
         if before != after:
             audit('task.updated', 'task', task_id, title, board_id=task['board_id'],
                   task=lookup('tasks', task_id), previous=before, new=after)
@@ -1112,6 +1250,8 @@ def create_app(config=None):
             clauses.append("action NOT IN ('task.assigned','task.unassigned')")
         if 'download_attachments' not in permissions:
             clauses.append("entity_type != 'attachment'")
+        if 'view_tags' not in permissions:
+            clauses.append("entity_type != 'tag' AND action NOT IN ('task.tag_added','task.tag_removed')")
         return clauses
 
     def activity_results(task_id=None):
@@ -1175,6 +1315,8 @@ def create_app(config=None):
                 subject = db().execute('SELECT display_name,username FROM users WHERE id=?', (entry['entity_id'],)).fetchone()
                 entry['entity_display_name'] = subject['display_name'] or subject['username'] if subject else entry['entity_name']
             for snapshot in (entry['previous'], entry['new']):
+                if 'view_tags' not in effective(g.user):
+                    snapshot.pop('tags', None)
                 if entry['action'] in ('task.assigned', 'task.unassigned') and snapshot.get('user_id'):
                     account = db().execute('SELECT display_name,username FROM users WHERE id=?', (snapshot['user_id'],)).fetchone()
                     if account:
@@ -1253,13 +1395,25 @@ def create_app(config=None):
                 abort(400, description='A coluna da tarefa importada é inválida.')
             title, description, priority = task_values(task)
             dates = task_dates(task)
+            if 'tags' in task and 'tag_ids' not in task:
+                names = task['tags']
+                if not isinstance(names, list) or len(names) > 20 or any(not isinstance(name, str) for name in names):
+                    abort(400, description='Tags importadas inválidas.')
+                for name in names:
+                    if not db().execute('SELECT 1 FROM tags WHERE name_key=?', (name.strip().casefold(),)).fetchone():
+                        need('create_tags')
+                        values = tag_values({'name': name})
+                        tag_id = uid()
+                        db().execute('INSERT INTO tags(id,name,name_key,color,description,created_by,creator_name,created_at) VALUES(?,?,?,?,?,?,?,?)',
+                                     (tag_id, values['name'], values['name'].casefold(), values['color'], values['description'], g.user['id'], g.user['username'], now()))
+                        audit('tag.created', 'tag', tag_id, values['name'], new=values)
             tags = task_tags(task)
             task_id = uid()
             db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                          (task_id, board_id, mapping[task['status']], title, description, priority,
                           pos, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery']))
-            db().execute('UPDATE tasks SET tags=? WHERE id=?', (json.dumps(tags, ensure_ascii=False), task_id))
             imported = lookup('tasks', task_id)
+            save_task_tags(imported, tags)
             audit('task.created', 'task', task_id, title, board_id=board_id, task=imported, new=task_snapshot(imported))
         db().execute('INSERT INTO metadata VALUES(?,?)', (marker, board_id))
         return jsonify(board_id=board_id), 201

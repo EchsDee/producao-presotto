@@ -153,12 +153,14 @@ class ProfileTests(unittest.TestCase):
                 db.execute('ALTER TABLE users DROP COLUMN '+column)
             for field in ('task_date','desired_delivery','tags'):
                 db.execute('ALTER TABLE tasks DROP COLUMN '+field)
+            db.execute('DROP TABLE task_tags')
+            db.execute('DROP TABLE tags')
             db.execute('PRAGMA user_version=2')
         create_app(self.config)
         with closing(connect(self.path)) as db:
             after=tuple(db.execute('SELECT id,username,password_hash,role,permissions FROM users').fetchone())
             self.assertEqual(before,after)
             self.assertEqual(db.execute('SELECT display_name FROM users').fetchone()[0],'Admin')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],5)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],6)
             self.assertFalse(db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertEqual(self.board()['tasks'][0]['assignees'],[self.admin['id']])

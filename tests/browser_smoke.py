@@ -48,7 +48,9 @@ def main():
                 review.get_by_role('button', name='+ Adicionar tarefa').click()
                 page.locator('#title').fill('Browser task')
                 page.locator('#description').fill('Original description')
-                page.locator('#task-tags').fill('Corte, Urgente')
+                for name in ['Corte','Urgente']:
+                    page.evaluate("async name => {await api('/tags',{method:'POST',data:{name}});await loadTags();renderTaskTags();}",name)
+                    page.locator('#task-tag-options label').filter(has_text=name).locator('input').check()
                 page.locator('#task-date').fill('2026-10-21')
                 page.locator('#desired-delivery').fill('2026-11-05')
                 page.locator('#assignee-picker').click()
