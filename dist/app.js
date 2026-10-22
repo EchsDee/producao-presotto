@@ -70,26 +70,48 @@ function openTag(tag=null) {
   $('#tag-name').value=tag?.name||'';$('#tag-color').value=tag?.color||'#475569';
   $('#tag-description').value=tag?.description||'';$('#tag-active').checked=tag?tag.active:true;
   for(const id of ['tag-name','tag-color','tag-description'])$('#'+id).disabled=tag?!can('edit_tags'):!can('create_tags');
-  $('#tag-active').disabled=!can('manage_tag_status');$('#tag-dialog').showModal();
+  $('#tag-active').disabled=!can('manage_tag_status');renderTagPreview();$('#tag-dialog').showModal();
+}
+function renderTagPreview() {
+  const color=$('#tag-color').value,preview=$('#tag-preview-chip');preview.replaceChildren(tagChip({name:$('#tag-name').value.trim()||'Sua tag',color}));
+  const palette=$('#tag-palette');palette.replaceChildren();
+  for(const value of ['#475569','#dc2626','#ea580c','#d97706','#16a34a','#0891b2','#2563eb','#7c3aed']) {
+    const swatch=el('button','tag-swatch');swatch.type='button';swatch.style.backgroundColor=value;
+    swatch.setAttribute('aria-label','Usar cor '+value);swatch.setAttribute('aria-pressed',String(color===value));
+    swatch.disabled=$('#tag-color').disabled;
+    swatch.onclick=()=>{$('#tag-color').value=value;renderTagPreview();};palette.append(swatch);
+  }
 }
 function renderTagManagement() {
   const list=$('#tag-list');list.replaceChildren();
+  $('#tag-total').textContent=tagRegistry.length;
+  $('#tag-active-count').textContent=tagRegistry.filter(tag=>tag.active).length;
+  $('#tag-inactive-count').textContent=tagRegistry.filter(tag=>!tag.active).length;
   const query=$('#tag-search').value.toLocaleLowerCase('pt-BR'),status=$('#tag-status-filter').value;
-  for(const tag of tagRegistry.filter(t=>(t.name+' '+t.description).toLocaleLowerCase('pt-BR').includes(query)&&(!status||t.active===(status==='active')))) {
-    const row=el('tr'),name=el('td');name.append(tagChip(tag));row.append(name,el('td','',tag.description),el('td','',tag.active?'Ativa':'Inativa'),el('td','',tag.task_count),el('td','',tag.creator_name+' · '+new Date(tag.created_at).toLocaleString('pt-BR')));
+  const filtered=tagRegistry.filter(t=>(t.name+' '+t.description).toLocaleLowerCase('pt-BR').includes(query)&&(!status||t.active===(status==='active')));
+  $('#tag-results').textContent=filtered.length+' de '+tagRegistry.length+' tags';
+  for(const tag of filtered) {
+    const row=el('tr'),name=el('td','tag-name-cell');name.append(tagChip(tag));
+    const statusCell=el('td'),badge=el('span','tag-status-badge'+(tag.active?' is-active':''),tag.active?'Ativa':'Inativa');statusCell.append(badge);
+    const count=el('td');count.append(el('span','tag-use-count',tag.task_count));
+    const created=el('td','tag-created');created.append(el('span','',tag.creator_name),el('small','',new Date(tag.created_at).toLocaleString('pt-BR')));
+    row.append(name,el('td','tag-description-cell',tag.description||'—'),statusCell,count,created);
     const actions=el('td','tag-actions');
     if(can('edit_tags')||can('manage_tag_status'))actions.append(button('Editar',()=>openTag(tag),'secondary'));
     if(can('delete_tags'))actions.append(button('Excluir',async()=>{
       if(!confirm('Excluir a tag "'+tag.name+'"? Ela está em '+tag.task_count+' tarefa(s). As tarefas serão mantidas. Para manter as associações, prefira desativar a tag.'))return;
       await api('/tags/'+tag.id,{method:'DELETE',data:{version:tag.version}});await loadTags();renderTagManagement();message('Tag excluída.');
     },'secondary danger'));
-    row.append(actions);list.append(row);
+    row.append(actions);
+    [...row.children].forEach((cell,index)=>cell.dataset.label=['Tag','Descrição','Status','Tarefas','Cadastro','Ações'][index]);
+    list.append(row);
   }
   if(!list.children.length){const row=el('tr'),cell=el('td','field-hint','Nenhuma tag encontrada.');cell.colSpan=6;row.append(cell);list.append(row);}
 }
 async function showTagManagement() {
   if(!hasTagManagement())throw new Error('Você não tem acesso ao cadastro de tags.');
   await loadTags();$('#tag-management').hidden=false;$('#users-list').hidden=true;$('#new-user').hidden=true;
+  $('#admin-tags-tab').setAttribute('aria-pressed','true');$('#admin-users-tab').setAttribute('aria-pressed','false');
   $('#new-tag').hidden=!can('create_tags');
   renderTagManagement();
 }
@@ -696,6 +718,7 @@ async function showAdmin() {
   $('#new-user').hidden = !can('manage_users');
   $('#admin-users-tab').hidden=!canUsers;$('#admin-tags-tab').hidden=!hasTagManagement();
   $('#tag-management').hidden=true;$('#users-list').hidden=false;
+  $('#admin-tags-tab').setAttribute('aria-pressed','false');$('#admin-users-tab').setAttribute('aria-pressed','true');
   if(!canUsers){await showTagManagement();return;}
   const list = $('#users-list'); list.replaceChildren();
   for (const account of users) {
@@ -932,6 +955,8 @@ $('#admin-tags-tab').onclick=()=>run(showTagManagement);
 $('#new-tag').onclick=()=>openTag();
 $('#tag-cancel').onclick=()=>$('#tag-dialog').close();
 $('#tag-search').oninput=renderTagManagement;
+$('#tag-name').oninput=renderTagPreview;
+$('#tag-color').oninput=renderTagPreview;
 $('#tag-status-filter').onchange=renderTagManagement;
 $('#task-tag-search').oninput=renderTaskTags;
 $('#clear-tag-filters').onclick=()=>{tagFilters.clear();renderTagFilters();render();};
