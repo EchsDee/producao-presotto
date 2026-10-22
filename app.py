@@ -1433,11 +1433,22 @@ def create_app(config=None):
     return app
 
 
+def serve_application(application, host, port):
+    try:
+        from waitress import serve
+    except ModuleNotFoundError as error:
+        if error.name != 'waitress':
+            raise
+        from werkzeug.serving import run_simple
+        run_simple(host, port, application, threaded=True, use_reloader=False, use_debugger=False)
+    else:
+        serve(application, host=host, port=port, threads=8,
+              max_request_body_size=application.config['MAX_CONTENT_LENGTH'])
+
+
 if __name__ == '__main__':
-    from waitress import serve
     application = create_app()
     host = os.environ.get('KANBAN_HOST', '127.0.0.1')
     port = int(os.environ.get('KANBAN_PORT', '8000'))
     print(f'Produção Presotto: http://{host}:{port}', flush=True)
-    serve(application, host=host, port=port, threads=8,
-          max_request_body_size=application.config['MAX_CONTENT_LENGTH'])
+    serve_application(application, host, port)

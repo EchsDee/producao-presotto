@@ -242,7 +242,7 @@ def register(app, need, body, audit):
         current = settings()
         if data.get('version') != current['version']:
             abort(409, description='Configuração alterada por outra sessão.')
-        if set(data) != {'version', 'owner', 'repository', 'channel'} or not all(isinstance(data.get(k), str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', data[k]) and data[k] not in ('.', '..') for k in ('owner', 'repository')) or data.get('channel') not in ('stable', 'preview'):
+        if set(data) != {'version', 'owner', 'repository', 'channel'} or not all(isinstance(data.get(k), str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', data[k]) and data[k] not in ('.', '..') for k in ('owner', 'repository')) or data.get('channel') not in ('stable', 'preview', 'release-presotto'):
             abort(400, description='Informe proprietário, repositório e canal válidos.')
         try:
             with lock(directory):
@@ -282,6 +282,10 @@ def register(app, need, body, audit):
                         continue
                     if release.get('draft') or (config['channel'] == 'stable' and (release.get('prerelease') or not parsed[3])):
                         continue
+                    if config['channel'] == 'release-presotto':
+                        tag = release['tag_name'].removeprefix('v')
+                        if not re.fullmatch(r'\d+\.\d+\.\d+-release-presotto(?:\.[0-9A-Za-z-]+)*(?:\+[0-9A-Za-z.-]+)?', tag):
+                            continue
                     candidates.append((parsed, release))
                 release = max(candidates, key=lambda x: x[0])[1] if candidates else None
                 value = {'checked_at': time.time(), 'status': 'available' if release and version(release['tag_name']) > version(installed) else 'current', 'release': None}

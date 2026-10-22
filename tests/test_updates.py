@@ -57,6 +57,13 @@ class UpdateTests(unittest.TestCase):
             result=self.request('POST','/api/updates/download',{})
         self.assertEqual(result.status_code,200,result.json)
 
+    def test_client_runtime_without_waitress(self):
+        from app import serve_application
+        with patch.dict('sys.modules', {'waitress': None}), patch('werkzeug.serving.run_simple') as serve:
+            serve_application(self.app, '127.0.0.1', 8000)
+        serve.assert_called_once_with('127.0.0.1', 8000, self.app,
+                                      threaded=True, use_reloader=False, use_debugger=False)
+
     def test_semver(self):
         values=['1.0.1-alpha','1.0.1-alpha.2','1.0.1-alpha.10','1.0.1-beta','1.0.1-rc.1','1.0.1','1.0.2','2.0.0']
         self.assertEqual(sorted(values,key=updater.version),values)
@@ -149,6 +156,24 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaises(ValueError): updater.Redirect().redirect_request(req,None,302,'',{},'https://evil.test/a')
         redirected=updater.Redirect().redirect_request(req,None,302,'',{},'https://release-assets.githubusercontent.com/a')
         self.assertIsNone(redirected.get_header('Authorization'))
+
+    def test_presotto_channel_filters_and_persists(self):
+        result = self.request('PATCH', '/api/updates/settings', {
+            'version': 0, 'owner': 'presotto', 'repository': 'kanban', 'channel': 'release-presotto'})
+        self.assertEqual(result.status_code, 200, result.json)
+        self.assertEqual(self.client.get('/api/updates').json['settings']['channel'], 'release-presotto')
+        base = self.release(b'package')
+        releases = [{**base, 'tag_name': tag, 'prerelease': True} for tag in (
+            'v9.0.0', 'v9.0.0-beta.1', 'v9.0.0-release-presotto-other.1',
+            'v2.0.0-release-presotto.2', 'v2.0.0-release-presotto.10')]
+        releases.append({**base, 'tag_name': 'v3.0.0-release-presotto.1', 'draft': True})
+        with patch('updater.github', return_value=releases):
+            response = self.request('POST', '/api/updates/check', {})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['state']['release']['version'], '2.0.0-release-presotto.10')
+        with patch('updater.github', return_value=releases[:3]):
+            response = self.request('POST', '/api/updates/check', {})
+        self.assertIsNone(response.json['state']['release'])
 
     def test_package_rejects_traversal_and_dependency_changes(self):
         raw=self.bundle()
