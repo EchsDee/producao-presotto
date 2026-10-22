@@ -175,7 +175,7 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(manifest['version'],TARGET)
             self.assertEqual((destination/'requirements.txt').read_bytes(),requirements)
         with self.assertRaisesRegex(ValueError,'dependências'):
-            updater.unpack(raw,self.directory/'changed',CURRENT,requirements.replace(b'Pillow>=12,<13',b'Pillow>=11,<12'))
+            updater.unpack(raw,self.directory/'changed',CURRENT,requirements+b'\nadditional-package==1.0\n')
         self.assertFalse((self.directory/'changed').exists())
 
     def test_windows_bridge_preserves_dependencies_and_migrations(self):
