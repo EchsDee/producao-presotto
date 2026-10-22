@@ -1,4 +1,19 @@
 'use strict';
+const loadedBuild = document.querySelector('meta[name="app-build"]')?.content;
+let checkingVersion = false;
+async function checkApplicationVersion() {
+  if (!loadedBuild || !user || document.hidden || checkingVersion || !$('#version-notice').hidden) return;
+  checkingVersion = true;
+  try {
+    const response = await fetch('/version', {cache:'no-store', credentials:'same-origin'});
+    if (!response.ok) return;
+    const current = await response.json();
+    if (typeof current.revision === 'string' && current.revision !== loadedBuild) $('#version-notice').hidden = false;
+  } catch {} finally { checkingVersion = false; }
+}
+setInterval(checkApplicationVersion, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkApplicationVersion(); });
+window.addEventListener('focus', checkApplicationVersion);
 let updateInfo = null, updateWatching = false;
 let tagRegistry = [], selectedTaskTags = new Set(), tagFilters = new Set(), editingTag = null;
 function hasTagManagement() { return ['create_tags','edit_tags','delete_tags','manage_tag_status'].some(can); }
@@ -316,6 +331,7 @@ async function run(action) {
 }
 function cleanDialog(dialog) { dialog.querySelector('.dialog-feedback')?.remove(); }
 function showLogin() {
+  $('#version-notice').hidden = true;
   headerIdentityKey='';
   closeProfileMenu(); releaseAvatarPreview();
   if (savedTheme) applyTheme(savedTheme.colors);
@@ -902,6 +918,15 @@ $('#password-form').onsubmit = event => { event.preventDefault(); run(async () =
 }); };
 $('#board-menu').onclick = () => run(() => loadWorkspace());
 $('#settings').onclick = () => run(showAdmin);
+$('#reload-version').onclick = () => {
+  if (pending || uploadingFiles) {
+    $('#version-reload-hint').hidden = false;
+    $('#version-reload-hint').textContent = 'Aguarde a operação em andamento e tente novamente.';
+    return;
+  }
+  if (document.querySelector('dialog[open]') && !confirm('Há uma janela de edição aberta. Alterações não salvas e arquivos ainda não enviados serão descartados. Atualizar a página?')) return;
+  window.location.reload();
+};
 $('#admin-users-tab').onclick=()=>run(showAdmin);
 $('#admin-tags-tab').onclick=()=>run(showTagManagement);
 $('#new-tag').onclick=()=>openTag();

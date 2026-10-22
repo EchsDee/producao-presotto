@@ -187,6 +187,12 @@ def initialize(path):
 
 def create_app(config=None):
     app = Flask(__name__, static_folder=None)
+    release_version = (ROOT / 'VERSION').read_text().strip()
+    build_digest = hashlib.sha256()
+    for filename in ('VERSION', 'app.py', 'updater.py', 'dist/index.html', 'dist/app.js', 'dist/theme.css'):
+        build_digest.update(filename.encode())
+        build_digest.update((ROOT / filename).read_bytes())
+    build_revision = build_digest.hexdigest()
     app.config.update(
         DATABASE=os.environ.get('KANBAN_DATABASE', str(ROOT / 'data' / 'kanban.sqlite3')),
         MAX_FILE_BYTES=int(os.environ.get('KANBAN_MAX_FILE_MB', '20')) * 1024 * 1024,
@@ -440,7 +446,12 @@ def create_app(config=None):
 
     @app.get('/')
     def index():
-        return send_from_directory(ROOT / 'dist', 'index.html')
+        html = (ROOT / 'dist' / 'index.html').read_text(encoding='utf-8')
+        return app.response_class(html.replace('<head>', '<head><meta name="app-build" content="' + build_revision + '">', 1), mimetype='text/html')
+
+    @app.get('/version')
+    def application_version():
+        return jsonify(version=release_version, revision=build_revision)
 
     @app.get('/app.js')
     def javascript():
