@@ -41,7 +41,7 @@ class ActivityTests(unittest.TestCase):
         self.request('DELETE', '/api/tasks/' + task_id, {'version': self.board()['version']})
         history = self.client.get('/api/tasks/' + task_id + '/history').json['entries']
         self.assertEqual([e['action'] for e in reversed(history)], [
-            'task.created', 'task.updated', 'task.assigned', 'task.moved', 'task.unassigned', 'task.deleted'])
+            'task.created', 'task.assigned', 'task.updated', 'task.unassigned', 'task.assigned', 'task.moved', 'task.unassigned', 'task.deleted'])
         changed = next(e for e in history if e['action'] == 'task.updated')
         self.assertEqual(changed['previous']['description'], 'Details')
         self.assertEqual(changed['new']['description'], 'Updated description')
@@ -229,7 +229,7 @@ class ActivityTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         stamp = entries[0]['occurred_at']
         from urllib.parse import urlencode
-        self.assertEqual(len(self.logs('?' + urlencode({'task_id': task_id, 'start': stamp}))), 1)
+        self.assertEqual(len(self.logs('?' + urlencode({'task_id': task_id, 'start': stamp}))), 2)
         self.assertEqual(len(self.logs('?' + urlencode({'task_id': task_id, 'end': stamp}))), 0)
         first = self.client.get('/api/activity?limit=1').json
         second = self.logs('?limit=1&before=' + str(first['next_cursor']))
@@ -273,6 +273,7 @@ class ActivityTests(unittest.TestCase):
                 db.execute('ALTER TABLE tasks DROP COLUMN '+field)
             db.execute('DROP TABLE task_tags')
             db.execute('DROP TABLE tags')
+            test_app.remove_task_identifiers(db)
             db.execute('PRAGMA user_version=1')
             legacy = {'upload_attachments': False, 'delete_attachments': False,
                       'edit_tasks': False, 'view_boards': False, 'manage_users': True}
@@ -286,7 +287,7 @@ class ActivityTests(unittest.TestCase):
                 self.assertEqual(overrides[key], value)
             for key in ['download_attachments', 'assign_users', 'assign_self', 'delete_own_attachments']:
                 self.assertFalse(overrides[key])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 6)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 7)
             self.assertEqual(db.execute('SELECT content FROM attachments').fetchone()[0], b'preserve bytes')
             self.assertFalse(db.execute('PRAGMA foreign_key_check').fetchall())
         self.assertEqual(self.board()['tasks'][0]['id'], task_id)

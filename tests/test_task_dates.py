@@ -47,9 +47,10 @@ class TaskDateTests(unittest.TestCase):
             for field in ('task_date','desired_delivery','tags'):db.execute('ALTER TABLE tasks DROP COLUMN '+field)
             db.execute('DROP TABLE task_tags')
             db.execute('DROP TABLE tags')
+            test_app.remove_task_identifiers(db)
             db.execute('PRAGMA user_version=3')
         create_app(self.config)
         with closing(connect(self.path)) as db:
             self.assertEqual(original,tuple(db.execute('SELECT id,title,description,position,created_at FROM tasks WHERE id=?',(task,)).fetchone()))
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],6)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],7)
         self.assertIsNone(self.board()['tasks'][0]['task_date'])

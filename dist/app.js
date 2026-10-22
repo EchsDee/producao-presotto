@@ -291,7 +291,7 @@ const priorityLabel = value => ({normal: 'Normal', high: 'Alta', low: 'Baixa'}[v
 const displayName = value => ({'My board': 'Meu quadro', 'To do': 'A fazer', 'In progress': 'Em andamento',
   Done: 'Concluído', 'Imported browser board': 'Quadro importado do navegador'}[value] || value);
 function activityValues(value, field = '') {
-  const labels = {tags:'Tags',task_date:'Data',desired_delivery:'Entrega desejada',title:'Título',description:'Descrição',priority:'Prioridade',column_id:'ID da coluna',column_name:'Coluna',
+  const labels = {task_number:'N\u00famero da tarefa',order_number:'N\u00famero do pedido',tags:'Tags',task_date:'Data',desired_delivery:'Entrega desejada',title:'Título',description:'Descrição',priority:'Prioridade',column_id:'ID da coluna',column_name:'Coluna',
     position:'Posição',name:'Nome',type:'Tipo',username:'Usuário',user_id:'ID do usuário',role:'Perfil',overrides:'Permissões individuais',
     effective:'Permissões efetivas',enabled:'Conta ativa',filename:'Nome do arquivo',format:'Formato',size:'Tamanho (bytes)',sha256:'SHA-256',
     uploaded_by:'ID de quem enviou',uploaded_at:'Data de envio',uploader:'Enviado por',reason:'Motivo',source:'Origem',
@@ -457,7 +457,7 @@ function render() {
     const col = el('section', 'column'); col.dataset.type = column.type;
     col.setAttribute('aria-label', displayName(column.name));
     const list = board.tasks.filter(t => t.column_id === column.id &&
-      (t.title + ' ' + t.description + ' ' + (t.tags || []).join(' ')).toLowerCase().includes(query) &&
+      taskMatchesSearch(t, query) &&
       (!onlyMine || t.assigned_to_me) && (!selectedAssignee || t.assignees.includes(selectedAssignee)) &&
       (!can('view_tags') || [...tagFilters].every(id=>(t.tag_ids||[]).includes(id))));
     const head = el('div', 'column-head'), heading = el('span', '', displayName(column.name));
@@ -475,13 +475,14 @@ function render() {
       const settings = button('⚙', () => openColumn(column), '');
       settings.setAttribute('aria-label', "Configurações de " + column.name); head.append(settings);
     }
-    col.append(head);
+    const taskList = el('div', 'column-tasks'); taskList.setAttribute('aria-label', 'Tarefas de ' + column.name);
+    col.append(head, taskList);
     if (can('move_tasks')) {
-      col.ondragover = event => { if (dragged) {event.preventDefault(); col.classList.add('over');} };
-      col.ondragleave = event => { if (!col.contains(event.relatedTarget)) col.classList.remove('over'); };
+      col.ondragover = event => { if (dragged) {event.preventDefault(); col.classList.add('over'); updateDragScroll(event, taskList);} };
+      col.ondragleave = event => { if (!col.contains(event.relatedTarget)) { col.classList.remove('over'); stopDragScroll(); } };
       col.ondrop = event => {
         event.preventDefault(); col.classList.remove('over');
-        const taskId = dragged; dragged = null;
+        const taskId = dragged; stopDragScroll(); dragged = null;
         if (taskId) run(() => moveTask(taskId, column.id));
       };
     }
@@ -490,47 +491,56 @@ function render() {
       card.ondragstart = event => {
         dragged = task.id; event.dataTransfer.setData('text/plain', task.id); event.dataTransfer.effectAllowed = 'move';
       };
-      card.ondragend = () => { dragged = null; document.querySelectorAll('.over').forEach(c => c.classList.remove('over')); };
+      card.ondragend = () => { stopDragScroll(); dragged = null; document.querySelectorAll('.over').forEach(c => c.classList.remove('over')); };
       if (can('move_tasks')) {
         card.ondragover = event => { if (dragged && dragged !== task.id) event.preventDefault(); };
         card.ondrop = event => {
           event.preventDefault(); event.stopPropagation(); col.classList.remove('over');
-          const taskId = dragged; dragged = null;
+          const taskId = dragged; stopDragScroll(); dragged = null;
           if (taskId && taskId !== task.id) run(() => moveTask(taskId, column.id, task.id));
         };
       }
+      card.dataset.taskNumber = taskReference(task);
       const title = button(task.title, () => openTask(task), 'icon task-title');
-      
-      const h3 = el('h3'); h3.append(title); card.append(h3);
-      if (task.description) card.append(el('p', '', task.description));
-      if(task.tags?.length) {
-        const tags=el('div','task-tags');
-        for(const tag of task.tag_details || []) tags.append(tagChip(tag));
-        card.append(tags);
+      title.title = task.title;
+      const h3 = el('h3', 'card-heading');
+      const reference = el('span', 'task-number', '#' + taskReference(task));
+      reference.title = reference.textContent;
+      h3.append(reference, title); card.append(h3);
+      const metadata = el('div', 'card-metadata');
+      if (task.order_number) {
+        const order = el('span', 'task-order', 'Pedido: ' + task.order_number);
+        order.title = order.textContent; metadata.append(order);
       }
-      for (const [field,label] of [['task_date','Data'],['desired_delivery','Entrega desejada']]) {
-        if(task[field]) card.append(el('div','task-date',label+': '+task[field].split('-').reverse().join('/')));
+      if (task.desired_delivery) {
+        const date = el('time', 'task-due', task.desired_delivery.split('-').reverse().join('/'));
+        date.dateTime = task.desired_delivery; date.title = 'Entrega desejada: ' + date.textContent;
+        const today = new Date(); today.setHours(0,0,0,0);
+        date.classList.toggle('overdue', !done.has(task.column_id) && new Date(task.desired_delivery + 'T00:00:00') < today);
+        metadata.append(date);
+      }
+      if (metadata.children.length) card.append(metadata);
+      const bottom = el('div', 'card-bottom');
+      if (task.tag_details?.length) {
+        const tags = el('div', 'task-tags');
+        for (const tag of task.tag_details) tags.append(tagChip(tag));
+        bottom.append(tags);
       }
       if (can('view_task_assignees') && task.assignees.length) {
-        const identities = el('div','card-identities'); identities.append(avatarStack(task.assignees)); card.append(identities);
+        const identities = el('div', 'card-identities');
+        identities.title = task.assignees.map(id => personName(people.find(p => p.id === id))).join(', ');
+        identities.append(avatarStack(task.assignees));
+        if (task.assignees.length === 1) identities.append(el('span', 'card-assignee-name', identities.title));
+        bottom.append(identities);
       }
-      if (task.attachments.length) card.append(el('div', 'attachment-count', task.attachments.length + " anexo(s)"));
-      const foot = el('div', 'card-foot');
-      if (can('move_tasks')) {
-        const move = el('select'); options(move, board.columns.map(c => [c.id, displayName(c.name)]), task.column_id);
-        move.setAttribute('aria-label', "Mover " + task.title);
-        move.onchange = () => run(() => moveTask(task.id, move.value)); foot.append(move);
-      }
-      foot.append(button(can('edit_tasks') ? "Detalhes / Editar" : "Detalhes", () => openTask(task), 'icon edit'));
-      if (can('delete_tasks')) foot.append(button("Excluir", async () => {
-        if (confirm("Excluir “" + task.title + "” e todos os seus arquivos anexados?")) await mutate('/tasks/' + task.id, 'DELETE');
-      }, 'icon'));
-      card.append(foot); col.append(card);
+      if (bottom.children.length) card.append(bottom);
+      taskList.append(card);
     }
-    if (!list.length) col.append(el('p', 'empty', query ? "Nenhuma tarefa encontrada." : "Sem tarefas."));
-    if (can('create_tasks')) col.append(button("+ Adicionar tarefa", () => openTask(null, column.id), 'add'));
+    if (!list.length) taskList.append(el('p', 'empty', query ? 'Nenhuma tarefa encontrada.' : 'Sem tarefas.'));
+    if (can('create_tasks')) col.append(button('+ Adicionar tarefa', () => openTask(null, column.id), 'add'));
     surface.append(col);
   }
+  sizeBoard();
 }
 async function mutate(path, method, data = {}, version = board.version) {
   const result = await api(path, {method, data: {...data, version}});
@@ -556,12 +566,16 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   const today = new Date();
   $('#task-date').value = task ? task.task_date || '' : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
   $('#desired-delivery').value = task?.desired_delivery || '';
+  $('#order-number').value = task?.order_number || '';
+  $('#task-number').textContent = task ? '#' + taskReference(task) : '';
+  $('#task-number').hidden = !task;
+  $('#delete-task').hidden = !task || !can('delete_tasks');
   selectedTaskTags = new Set(task?.tag_ids || []);$('#task-tag-search').value='';taskTagDropdownOpen=false;renderTaskTags();
   options($('#status'), board.columns.map(c => [c.id, displayName(c.name)]), task?.column_id || status);
-  $('#status').disabled = !!task || !can('create_tasks');
+  $('#status').disabled = task ? !can('move_tasks') : !can('create_tasks');
   syncAssignments(task);
   const editable = task ? can('edit_tasks') : can('create_tasks');
-  for (const id of ['title', 'description', 'task-date', 'desired-delivery']) $('#' + id).disabled = !editable;
+  for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'order-number']) $('#' + id).disabled = !editable;
   $('#save-task').hidden = !editable;
   savedTaskFields = JSON.stringify(taskFields());
   $('#files').value = ''; renderPendingFiles();
@@ -572,7 +586,7 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   else if (can('view_task_history')) $('#task-history').append(el('p', 'field-hint', "Salve a tarefa para iniciar seu histórico."));
 }
 function taskFields() {
-  const data = {title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value || null};
+  const data = {order_number: $('#order-number').value.trim(), title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value || null};
   if(!editing && can('view_tags'))data.tag_ids=[...selectedTaskTags];
   if (!editing && (can('assign_users') || can('assign_self'))) {
     data.assignees = can('view_task_assignees')
@@ -593,8 +607,8 @@ function syncAssignments(task) {
   $('#assignee-section').hidden = !can('view_task_assignees');
   options($('#assignees'), people.map(p => [p.id, personName(p) + (p.enabled ? '' : " (desativado)")]));
   for (const option of $('#assignees').options) {
-    option.selected = task?.assignees.includes(option.value) || false;
-    option.disabled = !can('assign_users') && option.value !== user.id;
+    option.selected = task ? task.assignees.includes(option.value) : option.value === user.id;
+    option.disabled = (!task && option.value === user.id) || (!can('assign_users') && option.value !== user.id);
   }
   $('#assignees').disabled = !can('assign_users') && !can('assign_self');
   $('#assigned-people').replaceChildren();
@@ -606,7 +620,8 @@ function syncAssignments(task) {
   $('#assignment-hint').textContent = can('assign_users') ? "Ctrl / Command para selecionar mais de um responsável."
     : can('assign_self') ? "Permissão para atribuir apenas a si mesmo." : "Responsáveis: somente leitura.";
   $('#self-assignment').hidden = can('view_task_assignees') || (!can('assign_self') && !can('assign_users'));
-  $('#assign-self').checked = !!task?.assigned_to_me;
+  $('#assign-self').checked = task ? !!task.assigned_to_me : true;
+  $('#assign-self').disabled = !task;
   $('#assignment-controls').hidden = !task || !can('assign_users') || can('view_task_assignees');
   options($('#assignment-person'), people.map(p => [p.id, personName(p)]));
 }
@@ -801,7 +816,7 @@ function openUser(account = null) {
   $('#user-dialog').showModal();
 }
 function activityText(entry) {
-  const name = '“' + (entry.entity_display_name || entry.entity_name) + '”', before = entry.previous, after = entry.new;
+  const name = (entry.entity_type === 'task' && entry.task_number ? '#' + entry.task_number + ' ' : '') + '“' + (entry.entity_display_name || entry.entity_name) + '”', before = entry.previous, after = entry.new;
   const actorName = entry.actor_display_name || entry.actor_name;
   const verbs = {
     'tag.created':'cadastrou a tag', 'tag.updated':'alterou a tag', 'tag.deleted':'excluiu a tag',
@@ -839,12 +854,13 @@ function appendActivity(container, entries, allowHistory = false) {
       second: '2-digit', fractionalSecondDigits: 3, timeZoneName: 'short',
     }).format(new Date(entry.occurred_at));
     row.append(stamp, el('p', '', activityText(entry)));
+    if (entry.task_number && entry.entity_type !== 'task') row.append(el('small', 'muted', 'Tarefa: #' + entry.task_number + ' ' + entry.task_name));
     if (entry.board_name) row.append(el('small', 'muted', "Quadro: " + displayName(entry.board_name)));
     const details = el('details'), summary = el('summary', '', "O que mudou");
     details.append(summary, el('pre', '', JSON.stringify({Antes: activityValues(entry.previous), Depois: activityValues(entry.new)}, null, 2)));
     row.append(details);
     if (allowHistory && entry.task_id && can('view_task_history')) row.append(button("Ver histórico da tarefa", async () => {
-      $('#history-title').textContent = "Histórico · " + entry.task_name;
+      $('#history-title').textContent = "Histórico · " + (entry.task_number ? "#" + entry.task_number + " " : "") + entry.task_name;
       cleanDialog($('#history-dialog')); $('#history-dialog').showModal();
       await loadHistory(entry.task_id, 'standalone-history');
     }, 'icon'));
@@ -870,7 +886,7 @@ async function showActivity() {
   $('#workspace').hidden = $('#configuration-screen').hidden = $('#admin').hidden = $('#password-screen').hidden = true;
   $('#activity-screen').hidden = false;
   options($('#activity-user'), [['', "Todos os usuários"], ...filters.actors.map(a => [a.id, a.name])], $('#activity-user').value || '');
-  options($('#activity-task'), [['', "Todas as tarefas"], ...filters.tasks.map(t => [t.id, t.name + ' · ' + t.id.slice(0, 8)])], $('#activity-task').value || '');
+  options($('#activity-task'), [['', "Todas as tarefas"], ...filters.tasks.map(t => [t.id, (t.task_number ? '#' + t.task_number + ' ' : '') + t.name])], $('#activity-task').value || '');
   options($('#activity-action'), [['', "Todas as ações"], ['task', "Ações em tarefas"], ['column', "Ações em colunas"],
     ['attachment', "Ações em arquivos"], ['user', "Ações em contas"], ['board', "Ações em quadros"],
     ...Object.entries(config.activity_actions)], $('#activity-action').value || '');
@@ -1057,7 +1073,7 @@ async function closeTask() {
 }
 $('#cancel').onclick = () => run(closeTask);
 $('#dialog').addEventListener('cancel', event => { event.preventDefault(); run(closeTask); });
-for (const id of ['title', 'description', 'task-date', 'desired-delivery']) {
+for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'order-number']) {
   $('#' + id).addEventListener('input', scheduleAutosave);
   $('#' + id).addEventListener('change', scheduleAutosave);
 }
@@ -1210,3 +1226,65 @@ $('#update-settings-form').onsubmit=event=>{event.preventDefault();run(async()=>
   await api('/updates/settings',{method:'PATCH',data:{version:updateInfo.settings.version,owner:$('#update-owner').value.trim(),repository:$('#update-repository').value.trim(),channel:$('#update-channel').value}});
   await loadUpdates();message('Repositório salvo.');
 });};
+
+$('#status').onchange = () => {
+  if (!editing) return;
+  queueTaskAction(async () => {
+    if (can('edit_tasks')) await saveTaskDraft();
+    await moveTask(editing, $('#status').value);
+    taskVersion = board.version;
+  });
+};
+$('#delete-task').onclick = () => run(async () => {
+  if (!editing || !confirm('Excluir esta tarefa e todos os arquivos anexados?')) return;
+  clearTimeout(autosaveTimer);
+  await mutate('/tasks/' + editing, 'DELETE');
+  editing = null; pendingFiles = []; $('#dialog').close();
+});
+
+function taskReference(task) {
+  const number = Number(task.task_number);
+  return Number.isSafeInteger(number) && number > 0 ? String(number) : String(task.id || '');
+}
+function taskMatchesSearch(task, query) {
+  const number = taskReference(task);
+  if (/^#\d+$/.test(query.trim())) return number === query.trim().slice(1);
+  const assignees = can('view_task_assignees') ? task.assignees.map(id => {
+    const person = people.find(p => p.id === id);
+    return person ? personName(person) + ' ' + person.username : '';
+  }) : [];
+  return [number, '#' + number, task.title, task.description, task.order_number,
+    task.desired_delivery, task.desired_delivery?.split('-').reverse().join('/'),
+    ...(task.tags || []), ...assignees].join(' ').toLocaleLowerCase('pt-BR').includes(query);
+}
+function sizeBoard() {
+  const surface = $('.board');
+  if (!surface || !surface.getClientRects().length) return;
+  const height = window.visualViewport?.height || window.innerHeight;
+  surface.style.setProperty('--board-height', Math.max(120, height - surface.getBoundingClientRect().top - 20) + 'px');
+}
+window.addEventListener('resize', sizeBoard);
+window.visualViewport?.addEventListener('resize', sizeBoard);
+new ResizeObserver(sizeBoard).observe($('.app'));
+let dragScrollFrame = 0, dragScrollTarget = null, dragScrollSpeed = 0, dragScrollX = 0;
+function stopDragScroll() {
+  cancelAnimationFrame(dragScrollFrame); dragScrollFrame = 0; dragScrollTarget = null;
+}
+function updateDragScroll(event, list) {
+  const bounds = list.getBoundingClientRect(), edge = Math.min(60, bounds.height / 3);
+  dragScrollTarget = list; dragScrollX = event.clientX;
+  dragScrollSpeed = event.clientY < bounds.top + edge ? -10 : event.clientY > bounds.bottom - edge ? 10 : 0;
+  if (!dragScrollFrame) {
+    const step = () => {
+      if (!dragged || !dragScrollTarget) { stopDragScroll(); return; }
+      dragScrollTarget.scrollTop += dragScrollSpeed;
+      const board = $('.board'), area = board.getBoundingClientRect();
+      if (dragScrollX < area.left + 40) board.scrollLeft -= 8;
+      if (dragScrollX > area.right - 40) board.scrollLeft += 8;
+      dragScrollFrame = requestAnimationFrame(step);
+    };
+    dragScrollFrame = requestAnimationFrame(step);
+  }
+}
+document.addEventListener('dragend', stopDragScroll);
+document.addEventListener('drop', stopDragScroll);

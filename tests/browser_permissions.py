@@ -40,7 +40,7 @@ def main():
                 return page
 
             page = page_for('member')
-            page.get_by_role('button', name='Detalhes / Editar', exact=True).click()
+            page.locator('.task-title').click()
             expect(page.locator('#assignees option[value="' + fixture.admin['id'] + '"]')).to_be_disabled()
             expect(page.locator('#assignees option[value="' + member['id'] + '"]')).to_be_enabled()
             with page.expect_response(lambda r: r.url.endswith('/assignees') and r.request.method == 'PATCH') as result:
@@ -64,7 +64,7 @@ def main():
             page.context.close()
 
             page = page_for('upload-only')
-            page.get_by_role('button', name='Detalhes', exact=True).click()
+            page.locator('.task-title').click()
             expect(page.locator('#title')).to_be_disabled()
             expect(page.locator('#upload-form')).to_be_visible()
             page.locator('#files').set_input_files({'name': 'upload-only.txt', 'mimeType': 'text/plain', 'buffer': b'no delete right'})
@@ -73,7 +73,7 @@ def main():
             page.context.close()
 
             page = page_for('self-only')
-            page.get_by_role('button', name='Detalhes', exact=True).click()
+            page.locator('.task-title').click()
             expect(page.locator('#title')).to_be_disabled()
             expect(page.locator('#save-task')).to_be_hidden()
             with page.expect_response(lambda r: r.url.endswith('/assignees') and r.request.method == 'PATCH') as result:
@@ -87,7 +87,7 @@ def main():
 
             page = page_for('blind-manager')
             expect(page.locator('.card .assignees')).to_have_count(0)
-            page.get_by_role('button', name='Detalhes / Editar', exact=True).click()
+            page.locator('.task-title').click()
             expect(page.locator('#assignee-section')).to_be_hidden()
             expect(page.locator('#assignment-controls')).to_be_visible()
             page.locator('#assignment-person').select_option(label='upload-only')

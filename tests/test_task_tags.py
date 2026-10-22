@@ -133,6 +133,7 @@ class TaskTagsTests(unittest.TestCase):
             db.execute('DROP TABLE task_tags');db.execute('DROP TABLE tags')
             db.execute('UPDATE tasks SET tags=?,desired_delivery=? WHERE id=?',(json.dumps(['Corte','URGENTE','corte']),'2026-11-05',first))
             db.execute('UPDATE tasks SET tags=? WHERE id=?',(json.dumps(['corte','Outro']),second))
+            test_app.remove_task_identifiers(db)
             db.execute('PRAGMA user_version=5')
         create_app(self.config);create_app(self.config)
         with closing(connect(self.path)) as db:

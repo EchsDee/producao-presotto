@@ -138,9 +138,14 @@ def initialize(path):
         for migration in migrations[version:]:
 
 
-            for statement in migration.read_text(encoding='utf-8').split(';'):
-                if statement.strip():
+            statement = ''
+            for character in migration.read_text(encoding='utf-8'):
+                statement += character
+                if character == ';' and sqlite3.complete_statement(statement):
                     db.execute(statement)
+                    statement = ''
+            if statement.strip():
+                db.execute(statement)
             if migration.name.startswith('002_'):
 
 
@@ -274,15 +279,15 @@ def create_app(config=None):
             if subject:
                 entity_name = subject['display_name'] or subject['username']
         db().execute('INSERT INTO activity_log(occurred_at,actor_id,actor_name,action,entity_type,'
-                     'entity_id,entity_name,board_id,board_name,task_id,task_name,previous_values,new_values) '
-                     'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (
+                     'entity_id,entity_name,board_id,board_name,task_id,task_name,previous_values,new_values,task_number) '
+                     'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (
                          now(), g.user['id'], actor['display_name'] or actor['username'], action, entity_type, entity_id, entity_name,
                          board_id, board['name'] if board else None, task['id'] if task else None,
-                         task['title'] if task else None, json.dumps(previous or {}), json.dumps(new or {})))
+                         task['title'] if task else None, json.dumps(previous or {}), json.dumps(new or {}), task['task_number'] if task else None))
 
     def task_snapshot(task):
         col = lookup('columns', task['column_id'])
-        return {**{k: task[k] for k in ('title', 'description', 'priority', 'column_id', 'position', 'task_date', 'desired_delivery')}, 'tags': [t['name'] for t in registered_task_tags(task['id'])],
+        return {**{k: task[k] for k in ('task_number', 'order_number', 'title', 'description', 'priority', 'column_id', 'position', 'task_date', 'desired_delivery')}, 'tags': [t['name'] for t in registered_task_tags(task['id'])],
                 'column_name': col['name']}
 
     def file_snapshot(attachment):
@@ -310,15 +315,19 @@ def create_app(config=None):
         audit('task.deleted', 'task', task['id'], task['title'], board_id=task['board_id'],
               task=task, previous=task_snapshot(task))
 
-    def assign(task_id, data):
-        if 'assignees' not in data:
+    def assign(task_id, data, creator=False):
+        if 'assignees' not in data and not creator:
             return
-        ids = data['assignees']
+        ids = data.get('assignees', [])
         if not isinstance(ids, list) or len(ids) > 100 or any(not isinstance(i, str) for i in ids):
             abort(400, description='Os responsáveis informados são inválidos.')
         current = {r[0] for r in db().execute('SELECT user_id FROM task_assignees WHERE task_id=?', (task_id,))}
         desired = set(ids)
+        if creator:
+            desired.add(g.user['id'])
         changed = current ^ desired
+        if creator:
+            changed.discard(g.user['id'])
         permissions = effective(g.user)
         if changed and 'assign_users' not in permissions:
             if 'assign_self' not in permissions or changed != {g.user['id']}:
@@ -1101,6 +1110,12 @@ def create_app(config=None):
             dates[key] = value
         return dates
 
+    def task_order_number(data, existing=None):
+        value = data.get('order_number', existing['order_number'] if existing is not None else '')
+        if not isinstance(value, str) or len(value) > 100:
+            abort(400, description='Informe um número do pedido com até 100 caracteres.')
+        return value.strip()
+
     @app.post('/api/boards/<board_id>/tasks')
     def create_task(board_id):
         need('create_tasks')
@@ -1113,12 +1128,12 @@ def create_app(config=None):
         tags = task_tags(data)
         position = db().execute('SELECT COALESCE(MAX(position),-1)+1 FROM tasks WHERE column_id=?', (column_id,)).fetchone()[0]
         task_id = uid()
-        db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-                     (task_id, board_id, column_id, title, description, priority, position, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery']))
+        db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery,order_number) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                     (task_id, board_id, column_id, title, description, priority, position, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery'], task_order_number(data)))
         task = lookup('tasks', task_id)
         save_task_tags(task, tags)
         audit('task.created', 'task', task_id, title, board_id=board_id, task=task, new=task_snapshot(task))
-        assign(task_id, data)
+        assign(task_id, data, creator=True)
         touch(board_id)
         return jsonify(board=serialize_board(board_id), task_id=task_id), 201
 
@@ -1131,14 +1146,15 @@ def create_app(config=None):
         title, description, priority = task_values(data)
         dates = task_dates(data, task)
         tags = task_tags(data, task)
+        order_number = task_order_number(data, task)
 
         if 'column_id' in data and data['column_id'] != task['column_id']:
             abort(400, description='Use a ação de mover para alterar a coluna.')
-        db().execute('UPDATE tasks SET title=?,description=?,priority=?,task_date=?,desired_delivery=?,updated_at=? WHERE id=?',
-                     (title, description, priority, dates['task_date'], dates['desired_delivery'], now(), task_id))
-        before = {k: task[k] for k in ('title', 'description', 'priority', 'task_date', 'desired_delivery')}
+        db().execute('UPDATE tasks SET title=?,description=?,priority=?,task_date=?,desired_delivery=?,order_number=?,updated_at=? WHERE id=?',
+                     (title, description, priority, dates['task_date'], dates['desired_delivery'], order_number, now(), task_id))
+        before = {k: task[k] for k in ('title', 'description', 'priority', 'task_date', 'desired_delivery', 'order_number')}
         save_task_tags(lookup('tasks', task_id), tags)
-        after = {'title': title, 'description': description, 'priority': priority, **dates}
+        after = {'title': title, 'description': description, 'priority': priority, 'order_number': order_number, **dates}
         if before != after:
             audit('task.updated', 'task', task_id, title, board_id=task['board_id'],
                   task=lookup('tasks', task_id), previous=before, new=after)
@@ -1355,7 +1371,7 @@ def create_app(config=None):
             if account:
                 actor['name'] = account['display_name'] or account['username']
         tasks = [dict(r) for r in db().execute(
-            f'SELECT a.task_id AS id,a.task_name AS name FROM activity_log a JOIN '
+            f'SELECT a.task_id AS id,a.task_name AS name,a.task_number FROM activity_log a JOIN '
             f'(SELECT MAX(id) AS id FROM activity_log WHERE ({where}) AND task_id IS NOT NULL GROUP BY task_id) latest '
             'ON latest.id=a.id ORDER BY a.task_name')]
         return jsonify(actors=actors, tasks=tasks)
@@ -1422,12 +1438,13 @@ def create_app(config=None):
                         audit('tag.created', 'tag', tag_id, values['name'], new=values)
             tags = task_tags(task)
             task_id = uid()
-            db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+            db().execute('INSERT INTO tasks(id,board_id,column_id,title,description,priority,position,created_by,created_at,updated_at,task_date,desired_delivery,order_number) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                          (task_id, board_id, mapping[task['status']], title, description, priority,
-                          pos, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery']))
+                          pos, g.user['id'], now(), now(), dates['task_date'], dates['desired_delivery'], task_order_number(task)))
             imported = lookup('tasks', task_id)
             save_task_tags(imported, tags)
             audit('task.created', 'task', task_id, title, board_id=board_id, task=imported, new=task_snapshot(imported))
+            assign(task_id, {}, creator=True)
         db().execute('INSERT INTO metadata VALUES(?,?)', (marker, board_id))
         return jsonify(board_id=board_id), 201
 

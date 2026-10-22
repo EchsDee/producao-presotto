@@ -31,3 +31,32 @@
 #task-selected-tags[hidden],#task-tag-options[hidden]{display:none}.task-tag-selector:has(#task-tag-options[hidden]) .task-tag-search-wrap{border-bottom:0}.task-tag-selector:has(#task-selected-tags[hidden]) .task-tag-search-wrap{border-top:0}
 
 #task-tag-options{display:flex;align-content:flex-start;flex-wrap:wrap;gap:9px;padding:14px}#task-tag-options .tag-choice{display:inline-flex;align-items:center;max-width:100%;padding:7px 11px;margin:0;border:0;border-radius:6px;font-size:11px;font-weight:600;line-height:1.35;cursor:pointer;transition:box-shadow .15s,filter .15s}#task-tag-options .tag-choice:hover:not(:disabled){filter:brightness(.94);box-shadow:0 2px 5px #08073f18}#task-tag-options .tag-choice[aria-pressed=true]{outline:2px solid var(--navy);outline-offset:2px}#task-tag-options .tag-choice:focus-visible{outline:2px solid var(--navy);outline-offset:3px}#task-tag-options .tag-choice:disabled{cursor:default;opacity:.65}#task-tag-options>p.field-hint{width:100%;margin:0}
+
+/* Compact cards and independent viewport-constrained column scrolling. */
+.board{height:var(--board-height,60dvh);max-height:var(--board-height,60dvh);min-height:0;grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:300px;align-items:stretch;overflow-x:auto;overflow-y:hidden;gap:16px;padding-bottom:12px}
+.column{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0;padding:10px;overflow:hidden}
+.column-head{flex:none;min-height:48px;padding:2px 3px 10px}
+.column-tasks{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;scrollbar-width:thin;padding:1px 3px 1px 1px;scroll-behavior:smooth}
+.column>.add{flex:none;margin-top:8px;padding:8px}
+.card{padding:10px 11px;margin-bottom:8px;min-width:0;border-radius:8px}
+.card .card-heading{display:flex;align-items:baseline;gap:8px;margin:0;min-width:0}
+.task-number{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.card .task-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;min-width:0;padding:0;font-size:13px;line-height:1.4;text-align:left;overflow-wrap:anywhere;color:var(--ink)}
+.card-metadata{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:7px;font-size:10px;color:var(--muted)}
+.task-order{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-due{white-space:nowrap}.task-due.overdue{color:var(--danger);background:color-mix(in srgb,var(--danger) 8%,transparent);border-radius:4px;padding:0 4px}
+.card-bottom{display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;margin-top:8px}
+.card .task-tags{display:flex;flex-wrap:wrap;gap:4px;margin:0;min-width:0;flex:1}
+.card .task-tag{font-size:9px;padding:2px 5px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .card-identities{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin:0 0 0 auto;min-height:22px;min-width:0;max-width:100%;font-size:10px;color:var(--muted)}
+.card .user-avatar{width:22px;height:22px;font-size:8px}.card-assignee-name{max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-detail-number{display:block;margin-bottom:4px}#delete-task{margin-right:auto;color:var(--danger)}
+@media(max-width:760px){.board{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:min(300px,85vw);overflow-x:auto;overflow-y:hidden;gap:12px}.column{min-height:0}.card{padding:10px}.column-head{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.column-tasks{scroll-behavior:auto}}
+
+@media(max-width:760px){
+.topbar-inner{padding:10px 16px;gap:8px}.brand img{width:132px}.account{gap:2px}.profile-chip{padding:0}.topbar .secondary{padding:5px;font-size:10px}
+.app{padding:12px}.intro{margin:8px 0 12px}.toolbar{padding:9px;gap:8px;margin-bottom:10px}.board-heading{gap:6px}.board-actions{gap:5px}.board-actions .secondary{padding:5px 7px}.filter-bar{margin-bottom:10px;gap:6px}.search{padding-top:8px;padding-bottom:8px}.search-wrap:before{top:11px}.search-wrap:after{top:22px}.tag-filter-panel{margin-bottom:10px;padding:8px 12px}#notice:not(:empty){padding:7px 10px;margin-bottom:8px}
+}
+
+.card .task-number{max-width:72px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis}.task-detail-number{overflow-wrap:anywhere;white-space:normal}

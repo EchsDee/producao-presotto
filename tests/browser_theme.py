@@ -80,7 +80,7 @@ def main():
             page.set_viewport_size({'width':390,'height':844})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path=str(output/'quadro-celular.png'), full_page=True)
-            page.get_by_role('button',name='Detalhes / Editar',exact=True).first.click()
+            page.locator('.task-title').first.click()
             expect(page.locator('#task-history')).to_contain_text('criou a tarefa')
             assert page.locator('#dialog').evaluate('(e)=>e.scrollWidth<=e.clientWidth')
             page.locator('#cancel').click()

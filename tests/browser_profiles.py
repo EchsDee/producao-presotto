@@ -48,7 +48,7 @@ def main():
             page.reload();expect(page.locator('#workspace')).to_be_visible()
             expect(page.locator('#profile-name')).to_have_text('Mariana Silva')
             expect(page.locator('#profile-avatar img')).to_be_visible()
-            page.get_by_role('button',name='Detalhes / Editar',exact=True).click()
+            page.locator('.task-title').click()
             expect(page.locator('#assigned-people .assigned-person')).to_have_count(4)
             expect(page.locator('#assigned-people')).to_contain_text('Mariana Silva')
             page.locator('#assignee-picker summary').click()

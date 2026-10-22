@@ -13,6 +13,19 @@ from app import PH, connect, create_app
 from backup import backup
 
 
+def remove_task_identifiers(db):
+    # Fixtures that simulate old schemas must remove migration 007 as well.
+    for trigger in ('tasks_assign_number', 'tasks_number_immutable', 'task_numbers_no_delete', 'task_numbers_no_update'):
+        db.execute('DROP TRIGGER IF EXISTS ' + trigger)
+    db.execute('DROP INDEX IF EXISTS tasks_number')
+    db.execute('DROP TABLE IF EXISTS task_numbers')
+    for table, fields in [('tasks', ('task_number', 'order_number')), ('activity_log', ('task_number',))]:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(' + table + ')')}
+        for field in fields:
+            if field in columns:
+                db.execute('ALTER TABLE ' + table + ' DROP COLUMN ' + field)
+
+
 class KanbanTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -86,7 +99,7 @@ class KanbanTests(unittest.TestCase):
         create_app(self.config)
         with closing(connect(self.path)) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM users').fetchone()[0], 0)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 6)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 7)
 
     def test_login_logout_cookie_and_csrf(self):
         self.assertEqual(self.app.test_client().get('/api/boards').status_code, 401)
