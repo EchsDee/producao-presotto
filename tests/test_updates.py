@@ -14,7 +14,7 @@ from app import connect, create_app
 
 
 CURRENT = (Path(__file__).resolve().parents[1] / 'VERSION').read_text().strip()
-_parts = CURRENT.split('.')
+_parts = CURRENT.split('-')[0].split('.')
 TARGET = '.'.join([*_parts[:2], str(int(_parts[2]) + 1)])
 
 
@@ -164,6 +164,31 @@ class UpdateTests(unittest.TestCase):
                 for key,value in modified.items():archive.writestr(key,value)
             with self.assertRaises(ValueError):updater.unpack(stream.getvalue(),self.directory/'unsafe','1.0.1',Path('requirements.txt').read_bytes())
         self.assertFalse((self.directory/'unsafe').exists())
+
+    def test_dependency_comparison_accepts_windows_line_endings_and_utf8_bom(self):
+        raw=self.bundle()
+        requirements=Path('requirements.txt').read_bytes()
+        variants=[requirements.replace(b'\n',b'\r\n'),b'\xef\xbb\xbf'+requirements,requirements.rstrip(b'\n')]
+        for index,value in enumerate(variants):
+            destination=self.directory/('format-'+str(index))
+            manifest=updater.unpack(raw,destination,CURRENT,value)
+            self.assertEqual(manifest['version'],TARGET)
+            self.assertEqual((destination/'requirements.txt').read_bytes(),requirements)
+        with self.assertRaisesRegex(ValueError,'dependências'):
+            updater.unpack(raw,self.directory/'changed',CURRENT,requirements.replace(b'Pillow>=12,<13',b'Pillow>=11,<12'))
+        self.assertFalse((self.directory/'changed').exists())
+
+    def test_windows_bridge_preserves_dependencies_and_migrations(self):
+        self.bundle()
+        source=Path(self.temp.name)/'source'
+        output=Path(self.temp.name)/'windows-bridge.zip'
+        build(source,output,windows_requirements=True)
+        expected=(source/'requirements.txt').read_bytes().replace(b'\n',b'\r\n')
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(archive.read('requirements.txt'),expected)
+            for migration in (source/'migrations').glob('*.sql'):
+                self.assertEqual(archive.read('migrations/'+migration.name),migration.read_bytes())
+        updater.unpack(output.read_bytes(),self.directory/'bridge',CURRENT,expected)
 
     def test_lock_prevents_multiple_operations(self):
         self.configure()

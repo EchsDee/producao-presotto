@@ -126,6 +126,10 @@ def allowed(name):
     return name in ('app.py', 'updater.py', 'VERSION', 'requirements.txt') or bool(re.fullmatch(r'migrations/\d{3}_[a-z_]+\.sql', name)) or bool(re.fullmatch(r'dist/[A-Za-z0-9_./-]+', name) and '..' not in name and '//' not in name)
 
 
+def requirements_content(value):
+    return value.removeprefix(b'\xef\xbb\xbf').replace(b'\r\n', b'\n').replace(b'\r', b'\n').rstrip(b'\n')
+
+
 def unpack(raw, destination, current, requirements):
 
     import io
@@ -146,7 +150,7 @@ def unpack(raw, destination, current, requirements):
         for required in ('app.py', 'updater.py', 'VERSION', 'requirements.txt', 'dist/index.html', 'dist/app.js', 'dist/theme.css'):
             if required not in files:
                 raise ValueError('Pacote incompleto.')
-        if archive.read('requirements.txt') != requirements:
+        if requirements_content(archive.read('requirements.txt')) != requirements_content(requirements):
             raise ValueError('Esta versão altera dependências e exige atualização assistida pelo operador.')
         if archive.read('VERSION').decode().strip() != manifest['version']:
             raise ValueError('Versão do pacote inconsistente.')
