@@ -186,6 +186,8 @@ def initialize(path):
 
 
 def create_app(config=None):
+    database = (config or {}).get('DATABASE') or os.environ.get('KANBAN_DATABASE', str(ROOT / 'data' / 'kanban.sqlite3'))
+    updater.wsgi_recover(ROOT, database)
     app = Flask(__name__, static_folder=None)
     release_version = (ROOT / 'VERSION').read_text().strip()
     build_digest = hashlib.sha256()

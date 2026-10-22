@@ -5,7 +5,7 @@ async function checkApplicationVersion() {
   if (!loadedBuild || !user || document.hidden || checkingVersion || !$('#version-notice').hidden) return;
   checkingVersion = true;
   try {
-    const response = await fetch('/version', {cache:'no-store', credentials:'same-origin'});
+    const response = await fetch('version', {cache:'no-store', credentials:'same-origin'});
     if (!response.ok) return;
     const current = await response.json();
     if (typeof current.revision === 'string' && current.revision !== loadedBuild) $('#version-notice').hidden = false;
@@ -173,6 +173,7 @@ async function loadUpdates() {
 async function showUpdateProgress() {
   const {progress} = await api('/updates/progress');
   const labels = {idle:'',downloading:'Baixando pacote…',downloaded:'Pacote validado e pronto para instalar.',installing:'Instalando e verificando o servidor…',installed:'Versão instalada e verificada.',failed:'A operação falhou. Consulte o histórico; a versão anterior foi preservada.'};
+  labels.restart_pending = 'Arquivos instalados. Aguardando reinicio da hospedagem.';
   $('#update-progress').hidden = !['downloading','installing'].includes(progress.status);
   $('#update-progress').value = progress.percent;
   $('#update-progress-label').textContent = labels[progress.status] || progress.status;
@@ -185,7 +186,7 @@ async function watchUpdate() {
     for (let attempt=0; attempt<120; attempt++) {
       await new Promise(resolve=>setTimeout(resolve,2000));
       try {
-        const response=await fetch('/api/updates/progress',{credentials:'same-origin'});
+        const response=await fetch('api/updates/progress',{credentials:'same-origin'});
         if(!response.ok) continue;
         const {progress}=await response.json();
         if(['installed','failed'].includes(progress.status)) {
@@ -217,7 +218,7 @@ function avatar(person, className = '') {
   const name = personName(person), node = el('span', 'user-avatar ' + className, initials(name));
   node.title = name; node.setAttribute('role','img'); node.setAttribute('aria-label',name);
   if (person?.avatar_url) {
-    const image = el('img'); image.src = person.avatar_url; image.alt = ''; image.draggable = false;
+    const image = el('img'); image.src = person.avatar_url.replace(/^\/api\//, 'api/'); image.alt = ''; image.draggable = false;
     image.onerror = () => { node.textContent = initials(name); };
     node.replaceChildren(image);
   }
@@ -343,7 +344,7 @@ async function api(path, {method = 'GET', data, form, version} = {}) {
   if (version !== undefined) headers['If-Match'] = String(version);
   let response;
   try {
-    response = await fetch('/api' + path, {
+    response = await fetch('api' + path, {
       method, headers, credentials: 'same-origin',
       body: form || (data !== undefined ? JSON.stringify(data) : undefined),
     });
@@ -698,7 +699,7 @@ function renderAttachments(task = board.tasks.find(t => t.id === editing)) {
   renderPendingFiles();
   for (const attachment of task?.attachments || []) {
     const item = el('div', 'attachment'), link = el('a', '', attachment.filename);
-    link.href = '/api/attachments/' + attachment.id + '/download';
+    link.href = 'api/attachments/' + attachment.id + '/download';
     item.append(link, el('small', '', attachment.format.toUpperCase() + ' · ' +
       new Intl.NumberFormat('pt-BR').format(attachment.size) + ' bytes · ' + new Date(attachment.uploaded_at).toLocaleString('pt-BR') +
       ' · ' + (attachment.uploader || "Usuário excluído")));

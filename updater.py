@@ -73,7 +73,7 @@ def read(path, default=None):
 
 
 @contextmanager
-def lock(directory):
+def lock(directory, shared=False):
     path = Path(directory) / 'operation.lock'
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -85,8 +85,8 @@ def lock(directory):
             msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        yield
+            fcntl.flock(descriptor, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+        yield descriptor
     except (BlockingIOError, PermissionError):
         raise ValueError('Outra atualização está em andamento.') from None
     finally:
@@ -128,6 +128,156 @@ def allowed(name):
 
 def requirements_content(value):
     return value.removeprefix(b'\xef\xbb\xbf').replace(b'\r\n', b'\n').replace(b'\r', b'\n').rstrip(b'\n')
+
+
+def wsgi_restart_file(root):
+    """Only the deployment entry point outside the update allowlist is touched."""
+    root = Path(root).resolve()
+    if root.name != 'app':
+        return None
+    path = root.parent / 'app.wsgi'
+    return path if path.is_file() and not path.is_symlink() else None
+
+
+def replace_wsgi_files(source, root, names):
+    from uuid import uuid4
+    for name in names:
+        if not allowed(name):
+            raise ValueError('Arquivo fora do protocolo de atualização.')
+        target = Path(root) / name
+        if target.is_symlink() or any(p.is_symlink() for p in target.parents if p != Path(root).parent):
+            raise ValueError('Links simbólicos não são permitidos na instalação.')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + '.update-' + uuid4().hex)
+        try:
+            temporary.write_bytes((Path(source) / name).read_bytes())
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def restore_wsgi(root, database, journal):
+    old = Path(journal['old_path'])
+    replace_wsgi_files(old, root, journal['old_files'])
+    for name in set(journal['new_files']) - set(journal['old_files']):
+        if allowed(name):
+            (Path(root) / name).unlink(missing_ok=True)
+    with closing(sqlite3.connect(journal['backup'])) as source, closing(sqlite3.connect(database)) as target:
+        source.backup(target)
+
+
+def wsgi_recover(root, database):
+    """Run before initialization; no external supervisor or background process."""
+    if not wsgi_restart_file(root):
+        return
+    directory = Path(database).resolve().parent / 'updates'
+    with lock(directory / 'wsgi-requests'):
+        journal = read(directory / 'wsgi-journal.json')
+        if journal and journal['phase'] == 'applying':
+            restore_wsgi(root, database, journal)
+            atomic(directory / 'progress.json', {'status': 'failed', 'percent': 100})
+            (directory / 'wsgi-journal.json').unlink()
+            wsgi_restart_file(root).touch()
+            raise RuntimeError('Atualização interrompida recuperada. Recarregue o aplicativo.')
+
+
+def wsgi_apply(root, database, target, rollback=False):
+    """Caller must hold both the request gate and operation lock."""
+    import importlib.util
+    import shutil
+    import sys
+    from uuid import uuid4
+    root, database = Path(root).resolve(), Path(database).resolve()
+    directory = database.parent / 'updates'
+    restart = wsgi_restart_file(root)
+    if not restart or not os.access(restart, os.W_OK):
+        raise ValueError('O arquivo app.wsgi precisa permitir o reinício pela aplicação.')
+    if read(directory / 'wsgi-journal.json'):
+        raise ValueError('Aguarde o reinício da atualização anterior.')
+    source = Path(target['path']) if rollback else directory / 'staging'
+    files = target['files']
+    required = {'app.py', 'updater.py', 'VERSION', 'requirements.txt', 'dist/index.html', 'dist/app.js', 'dist/theme.css'}
+    if not required <= set(files):
+        raise ValueError('Pacote incompleto.')
+    for name, digest in files.items():
+        if not allowed(name) or (source / name).is_symlink() or hashlib.sha256((source / name).read_bytes()).hexdigest() != digest:
+            raise ValueError('Os arquivos preparados foram alterados. Baixe novamente.')
+    if (source / 'VERSION').read_text().strip() != target['version']:
+        raise ValueError('Versão preparada inconsistente.')
+    if requirements_content((source / 'requirements.txt').read_bytes()) != requirements_content((root / 'requirements.txt').read_bytes()):
+        raise ValueError('Dependências alteradas; instalação assistida necessária.')
+    for name in ('app.py', 'updater.py'):
+        compile((source / name).read_bytes(), str(source / name), 'exec')
+    if not rollback:
+        for migration in (root / 'migrations').glob('*.sql'):
+            if not (source / 'migrations' / migration.name).is_file() or (source / 'migrations' / migration.name).read_bytes() != migration.read_bytes():
+                raise ValueError('O pacote altera migrações existentes.')
+    token = uuid4().hex
+    old = directory / 'releases' / ('wsgi-' + token)
+    old.mkdir(parents=True)
+    old_files = {}
+    paths = [root / name for name in ('app.py', 'updater.py', 'VERSION', 'requirements.txt')]
+    for folder in ('dist', 'migrations'):
+        paths.extend(p for p in (root / folder).rglob('*') if p.is_file())
+    for path in paths:
+        name = path.relative_to(root).as_posix()
+        if allowed(name):
+            destination = old / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, destination)
+            old_files[name] = hashlib.sha256(destination.read_bytes()).hexdigest()
+    from backup import backup
+    saved_db = backup(database, directory / ('before-wsgi-' + token + '.sqlite3'))
+    trial = backup(saved_db, directory / ('trial-wsgi-' + token + '.sqlite3'))
+    with closing(sqlite3.connect(database)) as connection:
+        schema = connection.execute('PRAGMA user_version').fetchone()[0]
+    # Import and initialize the candidate against an isolated database first.
+    module_name = '_presotto_candidate_' + token
+    spec = importlib.util.spec_from_file_location(module_name, source / 'app.py')
+    candidate = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = candidate
+    import_path = list(sys.path)
+    try:
+        spec.loader.exec_module(candidate)
+        probe = candidate.create_app({'TESTING': True, 'DATABASE': str(trial)})
+        with probe.test_client() as client:
+            response = client.get('/')
+            if response.status_code != 200:
+                raise ValueError('A nova versão não passou na verificação inicial.')
+            response.close()
+        journal = {'phase': 'applying', 'old_path': str(old), 'old_files': old_files,
+                   'new_files': files, 'backup': str(saved_db), 'version': target['version']}
+        atomic(directory / 'wsgi-journal.json', journal)
+        try:
+            atomic(directory / 'progress.json', {'status': 'installing', 'percent': 50})
+            replace_wsgi_files(source, root, files)
+            for name in set(old_files) - set(files):
+                (root / name).unlink(missing_ok=True)
+            candidate.initialize(str(database))
+            atomic(directory / 'previous.json', {'path': str(old), 'files': old_files,
+                   'version': (old / 'VERSION').read_text().strip(), 'schema': schema})
+            journal['phase'] = 'restart_pending'
+            atomic(directory / 'wsgi-journal.json', journal)
+            history = read(directory / 'history.json', [])
+            history.append({'from': (old / 'VERSION').read_text().strip(), 'to': target['version'],
+                            'status': 'restart_pending', 'finished_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                            'message': 'Arquivos aplicados; reinício WSGI solicitado.'})
+            atomic(directory / 'history.json', history[-100:])
+            atomic(directory / 'progress.json', {'status': 'restart_pending', 'percent': 90})
+            restart.touch()
+            (directory / 'download.json').unlink(missing_ok=True)
+        except Exception:
+            restore_wsgi(root, database, journal)
+            (directory / 'wsgi-journal.json').unlink(missing_ok=True)
+            atomic(directory / 'progress.json', {'status': 'failed', 'percent': 100})
+            restart.touch()
+            raise
+    finally:
+        sys.path[:] = import_path
+        sys.modules.pop(module_name, None)
+        # Keep the database and code backups; the preflight copy is disposable.
+        for suffix in ('', '-wal', '-shm'):
+            Path(str(trial) + suffix).unlink(missing_ok=True)
 
 
 def unpack(raw, destination, current, requirements):
@@ -174,10 +324,40 @@ def unpack(raw, destination, current, requirements):
 
 def register(app, need, body, audit):
     from flask import abort, g, jsonify, request
-    root = Path(__file__).resolve().parent
+    root = Path(app.root_path).resolve()
     directory = Path(app.config['DATABASE']).resolve().parent / 'updates'
     installed = (root / 'VERSION').read_text().strip()
     directory.mkdir(parents=True, exist_ok=True)
+
+    wsgi = wsgi_restart_file(root)
+    if wsgi:
+        journal = read(directory / 'wsgi-journal.json')
+        if journal and journal['phase'] == 'restart_pending' and journal['version'] == installed:
+            atomic(directory / 'progress.json', {'status': 'installed', 'percent': 100})
+            history = read(directory / 'history.json', [])
+            if history and history[-1]['to'] == installed:
+                history[-1].update(status='installed', message='Nova versão carregada pela hospedagem WSGI.')
+                atomic(directory / 'history.json', history)
+            (directory / 'wsgi-journal.json').unlink()
+
+        def wsgi_request_gate():
+            gate = lock(directory / 'wsgi-requests', shared=True)
+            try:
+                g.wsgi_descriptor = gate.__enter__()
+            except ValueError:
+                abort(503, description='Atualização ou acesso em andamento. Tente novamente.')
+            g.wsgi_gate = gate
+            if (root / 'VERSION').read_text().strip() != installed or read(directory / 'wsgi-journal.json'):
+                abort(503, description='Aguardando reinício WSGI. Recarregue em instantes.')
+
+        # Acquire before authentication opens a database transaction.
+        app.before_request_funcs.setdefault(None, []).insert(0, wsgi_request_gate)
+
+        @app.teardown_request
+        def release_wsgi_gate(error):
+            gate = g.pop('wsgi_gate', None)
+            if gate:
+                gate.__exit__(None, None, None)
 
     def settings():
         row = g.db.execute("SELECT value FROM metadata WHERE key='updates'").fetchone()
@@ -229,9 +409,9 @@ def register(app, need, body, audit):
         need('view_update_status')
         value = settings()
         state = read(directory / 'state.json', {})
-        managed = os.environ.get('KANBAN_MANAGED') == '1'
+        managed = os.environ.get('KANBAN_MANAGED') == '1' or bool(wsgi)
         configured, source = credential_status(directory)
-        return jsonify(current=installed, settings=value, state=state, managed=managed,
+        return jsonify(current=installed, settings=value, state=state, managed=managed, install_mode='wsgi' if wsgi else 'launcher',
                        token_configured=configured, token_source=source,
                        downloaded=read(directory / 'download.json'), previous=read(directory / 'previous.json'))
 
@@ -353,7 +533,7 @@ def register(app, need, body, audit):
         rollback = request.path.endswith('/rollback')
         if data.get('confirm') is not True:
             abort(400, description='Confirme a reinicialização antes de continuar.')
-        if os.environ.get('KANBAN_MANAGED') != '1':
+        if os.environ.get('KANBAN_MANAGED') != '1' and not wsgi:
             abort(409, description='Inicie o servidor com python launcher.py para instalar atualizações.')
         try:
             with lock(directory):
@@ -369,6 +549,20 @@ def register(app, need, body, audit):
                 event('rollback_requested' if rollback else 'install_requested', {'from': installed, 'to': target['version']})
 
                 g.db.commit()
+                if wsgi:
+                    try:
+                        if os.name != 'nt':
+                            import fcntl
+                            try:
+                                fcntl.flock(g.wsgi_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            except BlockingIOError:
+                                raise ValueError('Há acessos em andamento. Tente instalar novamente em instantes.')
+                        wsgi_apply(root, app.config['DATABASE'], target, rollback)
+                    except Exception as error:
+                        app.logger.exception('WSGI update failed')
+                        atomic(directory / 'progress.json', {'status': 'failed', 'percent': 100})
+                        raise ValueError('A instalação WSGI falhou; consulte o log. Os backups foram preservados.') from error
+                    return jsonify(ok=True, restarting=True), 202
                 atomic(directory / 'progress.json', {'status': 'queued', 'percent': 0})
                 atomic(directory / 'job.json', {'rollback': rollback, 'actor_id': g.user['id'], 'actor_name': g.user['username'], 'from': installed, 'to': target['version'], 'created_at': time.time()})
         except ValueError as error:
