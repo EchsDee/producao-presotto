@@ -255,7 +255,7 @@ class ActivityTests(unittest.TestCase):
         task_id = self.task()
         count = len(self.logs())
         response = self.client.post('/api/tasks/' + task_id + '/attachments',
-            data={'file': [(io.BytesIO(b'valid'), 'first.txt'), (io.BytesIO(b'invalid'), 'bad.exe')]},
+            data={'file': [(io.BytesIO(b'valid'), 'first.txt'), (io.BytesIO(b''), 'empty.exe')]},
             headers={'X-CSRF-Token': self.csrf, 'If-Match': str(self.board()['version'])})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(len(self.logs()), count)

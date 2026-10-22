@@ -48,7 +48,6 @@ def main():
             assert result.value.status == 200
             expect(page.locator('#task-history')).to_contain_text('atribuiu o usuário “member”')
             page.locator('#files').set_input_files({'name': 'member.txt', 'mimeType': 'text/plain', 'buffer': b'own file'})
-            page.locator('#upload-form button').click()
             expect(page.get_by_role('link', name='member.txt')).to_be_visible()
             expect(page.locator('.attachment').filter(has_text='admin.txt').get_by_role('button', name='Excluir arquivo')).to_have_count(0)
             own_file = page.locator('.attachment').filter(has_text='member.txt')
@@ -69,7 +68,6 @@ def main():
             expect(page.locator('#title')).to_be_disabled()
             expect(page.locator('#upload-form')).to_be_visible()
             page.locator('#files').set_input_files({'name': 'upload-only.txt', 'mimeType': 'text/plain', 'buffer': b'no delete right'})
-            page.locator('#upload-form button').click()
             expect(page.get_by_role('link', name='upload-only.txt')).to_be_visible()
             expect(page.get_by_role('button', name='Excluir arquivo')).to_have_count(0)
             page.context.close()

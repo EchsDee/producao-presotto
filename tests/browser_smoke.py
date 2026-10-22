@@ -57,7 +57,6 @@ def main():
                 expect(page.locator('#form-title')).to_have_text('Detalhes da tarefa')
                 dxf = b'0\r\nSECTION\r\n2\r\nENTITIES\r\n0\r\nENDSEC\r\n0\r\nEOF\r\n'
                 page.locator('#files').set_input_files({'name': 'browser.dxf', 'mimeType': 'application/octet-stream', 'buffer': dxf})
-                page.locator('#upload-form button').click()
                 expect(page.get_by_role('link', name='browser.dxf')).to_be_visible()
                 expect(page.locator('#task-history')).to_contain_text('enviou o arquivo')
                 with page.expect_download() as download_info:

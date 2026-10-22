@@ -65,8 +65,9 @@ let editingBoard = false, boardVersion = null, editingUser = null;
 let dragged = null, pending = false;
 let autosaveTimer = null, autosaveBlocked = false, savedTaskFields = '';
 let onlyMine = false, activityCursor = null;
-let assignmentQueue = Promise.resolve();
+let taskActionQueue = Promise.resolve();
 let taskDialogEpoch = 0;
+let pendingFiles = [], uploadingFiles = false, uploadFailed = false;
 let profileData = null, profileFile = null, profileAvatarAction = 'keep', avatarPreviewUrl = null;
 let headerIdentityKey = '';
 const personName = person => person?.display_name || person?.username || 'Usuário excluído';
@@ -401,8 +402,9 @@ async function mutate(path, method, data = {}, version = board.version) {
 async function moveTask(taskId, columnId, beforeId = null) {
   await mutate('/tasks/' + taskId + '/move', 'POST', {column_id: columnId, before_id: beforeId});
 }
-async function openTask(task = null, status = board.columns.find(c => c.type === 'todo')?.id || board.columns[0].id) {
+async function openTask(task = null, status = board.columns.find(c => c.type === 'todo')?.id || board.columns[0].id, preserveFiles = false) {
   taskDialogEpoch++;
+  if (!preserveFiles) { pendingFiles = []; uploadFailed = false; }
   clearTimeout(autosaveTimer); autosaveBlocked = false;
   editing = task?.id || null; taskVersion = board.version;
   cleanDialog($('#dialog'));
@@ -419,7 +421,7 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'task-tags']) $('#' + id).disabled = !editable;
   $('#save-task').hidden = !editable;
   savedTaskFields = JSON.stringify(taskFields());
-  $('#files').value = ''; $('#files-status').textContent = 'Nenhum arquivo selecionado';
+  $('#files').value = ''; renderPendingFiles();
   renderAttachments(task); $('#dialog').showModal();
   $('#task-history-section').hidden = !can('view_task_history');
   $('#task-history').replaceChildren(); $('#task-history-more').hidden = true;
@@ -485,9 +487,9 @@ async function changeAssignments(add, remove) {
   syncAssignments(board.tasks.find(t => t.id === editing));
   if (can('view_task_history')) await loadHistory(editing, 'task-history');
 }
-function queueAssignment(action) {
+function queueTaskAction(action) {
   const taskId = editing, actorId = user?.id, epoch = taskDialogEpoch;
-  assignmentQueue = assignmentQueue.then(async () => {
+  taskActionQueue = taskActionQueue.then(async () => {
     while (pending) await new Promise(resolve => setTimeout(resolve, 40));
     if (editing !== taskId || user?.id !== actorId || taskDialogEpoch !== epoch || !$('#dialog').open) return;
     await run(action);
@@ -506,11 +508,51 @@ function scheduleAutosave() {
     });
   }, 900);
 }
+function renderPendingFiles() {
+  const list = $('#queued-files'); list.replaceChildren();
+  $('#files').disabled = uploadingFiles;
+  $('#files-status').textContent = uploadingFiles ? 'Enviando arquivos…' : pendingFiles.length ? pendingFiles.length + ' arquivo(s) na seleção' : 'Nenhum arquivo selecionado';
+  $('#retry-upload').hidden = !editing || !uploadFailed || !pendingFiles.length;
+  for (const file of pendingFiles) {
+    const row = el('div', 'attachment');
+    row.append(el('span', '', file.name), el('small', '', !editing ? 'Será enviado ao salvar a tarefa.' : 'Aguardando envio.'));
+    const remove = button('Remover da seleção', () => {
+      pendingFiles = pendingFiles.filter(item => item !== file);
+      renderPendingFiles();
+    }, 'icon');
+    remove.disabled = uploadingFiles;
+    row.append(remove); list.append(row);
+  }
+}
+async function uploadPendingFiles() {
+  if (!editing || !pendingFiles.length || uploadingFiles) return;
+  clearTimeout(autosaveTimer);
+  uploadingFiles = true; uploadFailed = false; renderPendingFiles();
+  let count = 0;
+  try {
+    for (const file of [...pendingFiles]) {
+      const form = new FormData(); form.append('file', file);
+      const result = await api('/tasks/' + editing + '/attachments', {method:'POST', form, version:taskVersion});
+      board = result.board; taskVersion = board.version;
+      pendingFiles = pendingFiles.filter(item => item !== file);
+      count++; render(); renderAttachments();
+    }
+    message('Arquivos enviados.');
+  } catch (error) {
+    uploadFailed = pendingFiles.length > 0;
+    error.message = (count ? count + ' arquivo(s) enviado(s). ' : '') + 'Não foi possível concluir o envio. Os arquivos restantes continuam na seleção. ' + error.message;
+    throw error;
+  } finally {
+    uploadingFiles = false; renderPendingFiles(); scheduleAutosave();
+  }
+  if (can('view_task_history')) await loadHistory(editing, 'task-history');
+}
 function renderAttachments(task = board.tasks.find(t => t.id === editing)) {
   const list = $('#attachments'); list.replaceChildren();
-  $('#attachment-hint').textContent = !task ? "Salve a tarefa para adicionar arquivos."
+  $('#attachment-hint').textContent = !task ? "Os arquivos selecionados serão enviados ao salvar a tarefa."
     : "Todos os formatos. Até " + (config.max_file_bytes / 1024 / 1024) + " MB por arquivo.";
-  $('#upload-form').hidden = !task || !can('upload_attachments');
+  $('#upload-form').hidden = !can('upload_attachments');
+  renderPendingFiles();
   for (const attachment of task?.attachments || []) {
     const item = el('div', 'attachment'), link = el('a', '', attachment.filename);
     link.href = '/api/attachments/' + attachment.id + '/download';
@@ -800,18 +842,22 @@ $('#new').onclick = () => run(() => openTask());
 $('#assignees').onchange = () => {
   if (!editing) return;
   const selected = [...$('#assignees').selectedOptions].map(option => option.value);
-  queueAssignment(() => {
+  queueTaskAction(() => {
     const current = board.tasks.find(t => t.id === editing).assignees;
     return changeAssignments(selected.filter(id => !current.includes(id)), current.filter(id => !selected.includes(id)));
   });
 };
 $('#assign-self').onchange = () => {
   const assigned = $('#assign-self').checked;
-  if (editing) queueAssignment(() => changeAssignments(assigned ? [user.id] : [], assigned ? [] : [user.id]));
+  if (editing) queueTaskAction(() => changeAssignments(assigned ? [user.id] : [], assigned ? [] : [user.id]));
 };
-$('#assignment-add').onclick = () => { const id = $('#assignment-person').value; queueAssignment(() => changeAssignments([id], [])); };
-$('#assignment-remove').onclick = () => { const id = $('#assignment-person').value; queueAssignment(() => changeAssignments([], [id])); };
+$('#assignment-add').onclick = () => { const id = $('#assignment-person').value; queueTaskAction(() => changeAssignments([id], [])); };
+$('#assignment-remove').onclick = () => { const id = $('#assignment-person').value; queueTaskAction(() => changeAssignments([], [id])); };
 async function closeTask() {
+  if (pendingFiles.length) {
+    if (!editing) { if (!confirm('Descartar os arquivos selecionados e fechar a nova tarefa?')) return; pendingFiles = []; }
+    else await uploadPendingFiles();
+  }
   clearTimeout(autosaveTimer);
   if (editing && can('edit_tasks') && JSON.stringify(taskFields()) !== savedTaskFields) {
     if (autosaveBlocked) {
@@ -831,28 +877,26 @@ for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'task
 }
 $('#form').onsubmit = event => { event.preventDefault(); run(async () => {
   clearTimeout(autosaveTimer);
-  if (editing) { await saveTaskDraft(); $('#dialog').close(); return; }
+  if (editing) { await saveTaskDraft(); await uploadPendingFiles(); $('#dialog').close(); return; }
   const data = taskFields();
   if (!editing) data.column_id = $('#status').value;
   const result = await mutate(editing ? '/tasks/' + editing : '/boards/' + board.id + '/tasks', editing ? 'PATCH' : 'POST', data, taskVersion);
-  if (!editing) { editing = result.task_id; taskVersion = board.version; await openTask(board.tasks.find(t => t.id === editing)); }
+  if (!editing) { editing = result.task_id; taskVersion = board.version; await openTask(board.tasks.find(t => t.id === editing), undefined, true);
+    try { await uploadPendingFiles(); }
+    catch (error) { error.message = 'Tarefa criada. ' + error.message; throw error; } }
 }); };
-$('#upload-form').onsubmit = event => { event.preventDefault(); run(async () => {
-  const files = [...$('#files').files];
-  if (!files.length) throw new Error("Selecione pelo menos um arquivo.");
-  const form = new FormData();
-  for (const file of files) {
-    if (file.size > config.max_file_bytes) throw new Error(file.name + " excede o tamanho máximo permitido.");
-    form.append('file', file);
-  }
-  const result = await api('/tasks/' + editing + '/attachments', {method: 'POST', form, version: taskVersion});
-  board = result.board; taskVersion = board.version; render(); renderAttachments();
-  if (can('view_task_history')) await loadHistory(editing, 'task-history');
-  $('#files').value = ''; $('#files-status').textContent = 'Nenhum arquivo selecionado'; message("Arquivos enviados.");
-}); };
+$('#upload-form').onsubmit = event => event.preventDefault();
+$('#retry-upload').onclick = () => queueTaskAction(uploadPendingFiles);
 $('#files').onchange = () => {
-  const files = [...$('#files').files];
-  $('#files-status').textContent = files.length ? files.map(file => file.name).join(', ') : 'Nenhum arquivo selecionado';
+  const selected = [...$('#files').files];
+  $('#files').value = '';
+  if (!selected.length) return;
+  const invalid = selected.find(file => file.size === 0 || file.size > config.max_file_bytes);
+  if (invalid) { run(() => { throw new Error(invalid.name + (invalid.size === 0 ? ' está vazio.' : ' excede o tamanho máximo permitido.')); }); return; }
+  pendingFiles.push(...selected);
+  uploadFailed = false;
+  renderPendingFiles();
+  if (editing) queueTaskAction(uploadPendingFiles);
 };
 $('#new-column').onclick = () => openColumn();
 $('#column-cancel').onclick = () => $('#column-dialog').close();
