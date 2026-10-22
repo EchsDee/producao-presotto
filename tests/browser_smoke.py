@@ -50,7 +50,8 @@ def main():
                 page.locator('#description').fill('Original description')
                 for name in ['Corte','Urgente']:
                     page.evaluate("async name => {await api('/tags',{method:'POST',data:{name}});await loadTags();renderTaskTags();}",name)
-                    page.locator('#task-tag-options label').filter(has_text=name).locator('input').check()
+                    page.locator('#task-tag-search').fill(name)
+                    page.locator('#task-tag-options .tag-choice').filter(has_text=name).click()
                 page.locator('#task-date').fill('2026-10-21')
                 page.locator('#desired-delivery').fill('2026-11-05')
                 page.locator('#assignee-picker').click()

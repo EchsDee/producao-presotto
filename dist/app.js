@@ -16,6 +16,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 window.addEventListener('focus', checkApplicationVersion);
 let updateInfo = null, updateWatching = false;
 let tagRegistry = [], selectedTaskTags = new Set(), tagFilters = new Set(), editingTag = null;
+let taskTagDropdownOpen = false;
 function hasTagManagement() { return ['create_tags','edit_tags','delete_tags','manage_tag_status'].some(can); }
 function hasAdminAccess() { return can('manage_users') || can('manage_permissions') || hasTagManagement(); }
 function tagChip(tag) {
@@ -40,29 +41,51 @@ function renderTagFilters() {
   if (!tagRegistry.length) list.append(el('p','field-hint','Nenhuma tag cadastrada.'));
 }
 function renderTaskTags() {
+  const restoreFocus=$('#task-tag-options').contains(document.activeElement);
   $('#task-tag-section').hidden = !can('view_tags');
-  const list=$('#task-tag-options'),query=$('#task-tag-search').value.toLocaleLowerCase('pt-BR');list.replaceChildren();
-  for(const tag of tagRegistry.filter(t=>(t.active||selectedTaskTags.has(t.id))&&t.name.toLocaleLowerCase('pt-BR').includes(query))) {
-    const label=el('label','tag-option'),input=el('input');input.type='checkbox';input.value=tag.id;input.checked=selectedTaskTags.has(tag.id);
-    input.disabled=input.checked?!can('remove_tags'):!can('assign_tags')||!tag.active;
-    if(!editing&&!can('create_tasks'))input.disabled=true;
-    input.onchange=()=>{
-      const checked=input.checked;
-      if(!editing){checked?selectedTaskTags.add(tag.id):selectedTaskTags.delete(tag.id);renderTaskTags();return;}
-      input.disabled=true;
-      queueTaskAction(async()=>{
+  const selected=$('#task-selected-tags');selected.replaceChildren();
+  $('#task-tag-count').textContent=selectedTaskTags.size?selectedTaskTags.size+' selecionada'+(selectedTaskTags.size===1?'':'s'):'';
+  for(const tag of tagRegistry.filter(t=>selectedTaskTags.has(t.id))) {
+    const chip=tagChip(tag);chip.classList.add('selected-tag-chip');
+    if(!tag.active)chip.title='Tag inativa';
+    if(can('remove_tags')) {
+      const remove=el('button','remove-selected-tag','×');remove.type='button';
+      remove.setAttribute('aria-label','Remover tag '+tag.name);
+      remove.onclick=()=>setTaskTag(tag,false);chip.append(remove);
+    }
+    selected.append(chip);
+  }
+  selected.hidden=!selected.children.length;
+  const list=$('#task-tag-options'),query=$('#task-tag-search').value.trim().toLocaleLowerCase('pt-BR');list.replaceChildren();
+  list.hidden=!taskTagDropdownOpen;
+  $('#task-tag-search').setAttribute('aria-expanded',String(taskTagDropdownOpen));
+  if(!taskTagDropdownOpen)return;
+  const matches=tagRegistry.filter(t=>(t.active||selectedTaskTags.has(t.id))&&t.name.toLocaleLowerCase('pt-BR').includes(query));
+  for(const tag of matches) {
+    const chip=tagChip(tag),choice=el('button','task-tag tag-choice',tag.name),selected=selectedTaskTags.has(tag.id);
+    choice.type='button';choice.style.cssText=chip.style.cssText;
+    choice.setAttribute('aria-pressed',String(selected));
+    choice.disabled=selected?!can('remove_tags'):!can('assign_tags')||!tag.active;
+    if(!editing&&!can('create_tasks'))choice.disabled=true;
+    choice.title=(selected?'Remover tag ':'Adicionar tag ')+tag.name+(!tag.active?' (inativa)':'');
+    choice.onclick=()=>setTaskTag(tag,!selected);list.append(choice);
+  }
+  if(!list.children.length)list.append(el('p','field-hint',query?'Nenhuma tag encontrada.':'Nenhuma tag disponível.'));
+  if(restoreFocus)$('#task-tag-search').focus();
+}
+function setTaskTag(tag,checked) {
+  if(checked?!can('assign_tags')||!tag.active:!can('remove_tags'))return;
+  if(!editing){checked?selectedTaskTags.add(tag.id):selectedTaskTags.delete(tag.id);if(checked)$('#task-tag-search').value='';renderTaskTags();return;}
+  queueTaskAction(async()=>{
         const desired=new Set(board.tasks.find(t=>t.id===editing)?.tag_ids||[]);
         checked?desired.add(tag.id):desired.delete(tag.id);
         try {
           await mutate('/tasks/'+editing+'/tags','PATCH',{tag_ids:[...desired]},taskVersion);
           taskVersion=board.version;selectedTaskTags=new Set(board.tasks.find(t=>t.id===editing)?.tag_ids||[]);
+          if(checked)$('#task-tag-search').value='';
           if(can('view_task_history'))await loadHistory(editing,'task-history');
         } finally {renderTaskTags();}
-      });
-    };
-    label.append(input,tagChip(tag));if(!tag.active)label.append(el('small','field-hint','Inativa'));list.append(label);
-  }
-  if(!list.children.length)list.append(el('p','field-hint','Nenhuma tag disponível.'));
+  });
 }
 function openTag(tag=null) {
   editingTag=tag;cleanDialog($('#tag-dialog'));
@@ -532,7 +555,7 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   const today = new Date();
   $('#task-date').value = task ? task.task_date || '' : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
   $('#desired-delivery').value = task?.desired_delivery || '';
-  selectedTaskTags = new Set(task?.tag_ids || []);$('#task-tag-search').value='';renderTaskTags();
+  selectedTaskTags = new Set(task?.tag_ids || []);$('#task-tag-search').value='';taskTagDropdownOpen=false;renderTaskTags();
   options($('#status'), board.columns.map(c => [c.id, displayName(c.name)]), task?.column_id || status);
   $('#status').disabled = !!task || !can('create_tasks');
   syncAssignments(task);
@@ -958,7 +981,15 @@ $('#tag-search').oninput=renderTagManagement;
 $('#tag-name').oninput=renderTagPreview;
 $('#tag-color').oninput=renderTagPreview;
 $('#tag-status-filter').onchange=renderTagManagement;
-$('#task-tag-search').oninput=renderTaskTags;
+$('#task-tag-search').oninput=()=>{taskTagDropdownOpen=true;renderTaskTags();};
+$('#task-tag-search').onfocus=$('#task-tag-search').onclick=()=>{taskTagDropdownOpen=true;renderTaskTags();};
+document.addEventListener('click',event=>{
+  if(taskTagDropdownOpen&&!event.target.closest('.task-tag-selector')){taskTagDropdownOpen=false;renderTaskTags();}
+},true);
+$('#task-tag-section').addEventListener('keydown',event=>{
+  if(event.key==='Tab')setTimeout(()=>{if(taskTagDropdownOpen&&!$('#task-tag-section').contains(document.activeElement)){taskTagDropdownOpen=false;renderTaskTags();}},0);
+  if(event.key==='Escape'&&taskTagDropdownOpen){event.preventDefault();event.stopPropagation();taskTagDropdownOpen=false;renderTaskTags();$('#task-tag-search').focus();taskTagDropdownOpen=false;renderTaskTags();}
+});
 $('#clear-tag-filters').onclick=()=>{tagFilters.clear();renderTagFilters();render();};
 $('#tag-form').onsubmit=event=>{event.preventDefault();run(async()=>{
   const data={name:$('#tag-name').value.trim(),color:$('#tag-color').value,description:$('#tag-description').value,active:$('#tag-active').checked};
