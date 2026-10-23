@@ -300,6 +300,7 @@ function activityValues(value, field = '') {
   if (Array.isArray(value)) return value.map(item => field === 'effective' ? config.permissions[item] || item : activityValues(item));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) =>
     [config.permissions[key] || labels[key] || key, activityValues(item, key)]));
+  if (field === 'desired_delivery' && value) return formatDelivery(value);
   if (field === 'role') return roleLabel(value);
   if (field === 'priority') return priorityLabel(value);
   if (field === 'type') return {todo:'Início',doing:'Em andamento',done:'Concluído'}[value] || value;
@@ -513,10 +514,10 @@ function render() {
         order.title = order.textContent; metadata.append(order);
       }
       if (task.desired_delivery) {
-        const date = el('time', 'task-due', task.desired_delivery.split('-').reverse().join('/'));
-        date.dateTime = task.desired_delivery; date.title = 'Entrega desejada: ' + date.textContent;
+        const date = el('time', 'task-due', formatDelivery(task.desired_delivery, true));
+        date.dateTime = task.desired_delivery; date.title = 'Entrega desejada: ' + formatDelivery(task.desired_delivery);
         const today = new Date(); today.setHours(0,0,0,0);
-        date.classList.toggle('overdue', !done.has(task.column_id) && new Date(task.desired_delivery + 'T00:00:00') < today);
+        date.classList.toggle('overdue', !done.has(task.column_id) && new Date(task.desired_delivery.includes('T') ? task.desired_delivery : task.desired_delivery + 'T00:00:00') < (task.desired_delivery.includes('T') ? new Date() : today));
         metadata.append(date);
       }
       if (metadata.children.length) card.append(metadata);
@@ -565,7 +566,8 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   $('#title').value = task?.title || ''; $('#description').value = task?.description || '';
   const today = new Date();
   $('#task-date').value = task ? task.task_date || '' : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
-  $('#desired-delivery').value = task?.desired_delivery || '';
+  $('#desired-delivery').value = task?.desired_delivery?.split('T')[0] || '';
+  $('#desired-delivery-time').value = task?.desired_delivery?.split('T')[1] || '';
   $('#order-number').value = task?.order_number || '';
   $('#task-number').textContent = task ? '#' + taskReference(task) : '';
   $('#task-number').hidden = !task;
@@ -575,7 +577,8 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   $('#status').disabled = task ? !can('move_tasks') : !can('create_tasks');
   syncAssignments(task);
   const editable = task ? can('edit_tasks') : can('create_tasks');
-  for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'order-number']) $('#' + id).disabled = !editable;
+  for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'desired-delivery-time', 'order-number']) $('#' + id).disabled = !editable;
+  $('#desired-delivery-time').disabled = !editable || !$('#desired-delivery').value;
   $('#save-task').hidden = !editable;
   savedTaskFields = JSON.stringify(taskFields());
   $('#files').value = ''; renderPendingFiles();
@@ -586,7 +589,7 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   else if (can('view_task_history')) $('#task-history').append(el('p', 'field-hint', "Salve a tarefa para iniciar seu histórico."));
 }
 function taskFields() {
-  const data = {order_number: $('#order-number').value.trim(), title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value || null};
+  const data = {order_number: $('#order-number').value.trim(), title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value ? $('#desired-delivery').value + ($('#desired-delivery-time').value ? 'T' + $('#desired-delivery-time').value : '') : null};
   if(!editing && can('view_tags'))data.tag_ids=[...selectedTaskTags];
   if (!editing && (can('assign_users') || can('assign_self'))) {
     data.assignees = can('view_task_assignees')
@@ -1073,7 +1076,7 @@ async function closeTask() {
 }
 $('#cancel').onclick = () => run(closeTask);
 $('#dialog').addEventListener('cancel', event => { event.preventDefault(); run(closeTask); });
-for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'order-number']) {
+for (const id of ['title', 'description', 'task-date', 'desired-delivery', 'desired-delivery-time', 'order-number']) {
   $('#' + id).addEventListener('input', scheduleAutosave);
   $('#' + id).addEventListener('change', scheduleAutosave);
 }
@@ -1254,7 +1257,7 @@ function taskMatchesSearch(task, query) {
     return person ? personName(person) + ' ' + person.username : '';
   }) : [];
   return [number, '#' + number, task.title, task.description, task.order_number,
-    task.desired_delivery, task.desired_delivery?.split('-').reverse().join('/'),
+    task.desired_delivery, formatDelivery(task.desired_delivery), formatDelivery(task.desired_delivery, true),
     ...(task.tags || []), ...assignees].join(' ').toLocaleLowerCase('pt-BR').includes(query);
 }
 function sizeBoard() {
@@ -1288,3 +1291,15 @@ function updateDragScroll(event, list) {
 }
 document.addEventListener('dragend', stopDragScroll);
 document.addEventListener('drop', stopDragScroll);
+
+function formatDelivery(value, compact = false) {
+  if (!value) return '';
+  const [date, time] = value.split('T');
+  const [year, month, day] = date.split('-');
+  const label = compact && time ? day + '/' + month : day + '/' + month + '/' + year;
+  return label + (time ? ' ' + time : '');
+}
+$('#desired-delivery').addEventListener('input', () => {
+  if (!$('#desired-delivery').value) $('#desired-delivery-time').value = '';
+  $('#desired-delivery-time').disabled = $('#desired-delivery').disabled || !$('#desired-delivery').value;
+});

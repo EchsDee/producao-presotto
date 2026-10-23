@@ -1101,10 +1101,11 @@ def create_app(config=None):
             if value is None or value == '':
                 dates[key] = None
                 continue
-            if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
-                abort(400, description='Data inválida. Use o formato AAAA-MM-DD.')
+            pattern = r'\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?' if key == 'desired_delivery' else r'\d{4}-\d{2}-\d{2}'
+            if not isinstance(value, str) or not re.fullmatch(pattern, value):
+                abort(400, description='Data ou hor\u00e1rio inv\u00e1lido. Use AAAA-MM-DD ou AAAA-MM-DDTHH:MM para entrega.')
             try:
-                datetime.strptime(value, '%Y-%m-%d')
+                datetime.strptime(value, '%Y-%m-%dT%H:%M' if 'T' in value else '%Y-%m-%d')
             except ValueError:
                 abort(400, description='Informe uma data válida.')
             dates[key] = value

@@ -40,6 +40,38 @@ class TaskDateTests(unittest.TestCase):
         result=self.request('PATCH','/api/tasks/'+task,{'version':self.board()['version'],'title':'Task','task_date':'2026-10-21'},client,csrf)
         self.assertEqual(result.status_code,403)
 
+    def test_delivery_time_persists_preserves_minutes_and_is_audited(self):
+        task = self.task()
+        result = self.request('PATCH', '/api/tasks/' + task, {
+            'version': self.board()['version'], 'title': 'Timed delivery',
+            'desired_delivery': '2026-11-05T09:05'})
+        self.assertEqual(result.status_code, 200, result.json)
+        create_app(self.config)
+        self.assertEqual(self.board()['tasks'][0]['desired_delivery'], '2026-11-05T09:05')
+        result = self.request('PATCH', '/api/tasks/' + task, {
+            'version': self.board()['version'], 'title': 'Other edit'})
+        self.assertEqual(result.json['board']['tasks'][0]['desired_delivery'], '2026-11-05T09:05')
+        history = self.client.get('/api/tasks/' + task + '/history').json['entries']
+        self.assertTrue(any(entry['new'].get('desired_delivery') == '2026-11-05T09:05' for entry in history))
+        result = self.request('PATCH', '/api/tasks/' + task, {
+            'version': self.board()['version'], 'title': 'Date only', 'desired_delivery': '2026-11-05'})
+        self.assertEqual(result.json['board']['tasks'][0]['desired_delivery'], '2026-11-05')
+        result = self.request('PATCH', '/api/tasks/' + task, {
+            'version': self.board()['version'], 'title': 'Cleared', 'desired_delivery': None})
+        self.assertIsNone(result.json['board']['tasks'][0]['desired_delivery'])
+
+    def test_invalid_delivery_times_do_not_change_the_task(self):
+        task = self.task()
+        for value in ('2026-11-05T24:00', '2026-11-05T09:60', '2026-11-05T9:05',
+                      '2026-02-30T09:05', '2026-11-05T09:05:30', '2026-11-05T09:05Z', '09:05'):
+            result = self.request('PATCH', '/api/tasks/' + task, {
+                'version': self.board()['version'], 'title': 'Invalid time', 'desired_delivery': value})
+            self.assertEqual(result.status_code, 400, value)
+            self.assertIsNone(self.board()['tasks'][0]['desired_delivery'])
+        result = self.request('PATCH', '/api/tasks/' + task, {
+            'version': self.board()['version'], 'title': 'Invalid task date', 'task_date': '2026-11-05T09:05'})
+        self.assertEqual(result.status_code, 400)
+
     def test_migration_preserves_existing_task(self):
         task=self.task()
         with closing(connect(self.path)) as db:
