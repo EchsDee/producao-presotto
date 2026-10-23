@@ -60,3 +60,33 @@
 }
 
 .card .task-number{max-width:72px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis}.task-detail-number{overflow-wrap:anywhere;white-space:normal}
+
+/* Reserve most of the viewport for tasks, with two-line compact cards. */
+body:has(#workspace:not([hidden])) .topbar-inner{min-height:60px;padding-top:8px;padding-bottom:8px}
+body:has(#workspace:not([hidden])) .app{padding-top:10px;padding-bottom:10px}
+#workspace{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px}
+#workspace>.intro{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0}
+#workspace>.toolbar{grid-column:1/-1;margin:0;padding:8px 12px;min-height:54px;gap:10px}
+#workspace>.filter-bar{margin:0;min-width:0;gap:8px}
+#workspace>.tag-filter-panel{margin:0;padding:8px 12px;align-self:start;max-width:360px}
+#workspace>.tag-filter-panel[open]{grid-column:1/-1;max-width:none}
+#workspace>.board,#workspace>.notice-box{grid-column:1/-1}
+#workspace .board{gap:12px;grid-auto-columns:320px}
+#workspace .column{padding:6px}
+#workspace .column-head{min-height:36px;padding:0 3px 5px}
+#workspace .column-head .type-label{display:none}
+#workspace .column>.add{margin-top:5px;padding:5px}
+#workspace .card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 6px;padding:2px 7px;margin-bottom:3px}
+#workspace .card-heading{grid-column:1/-1;gap:6px;font-size:12px;line-height:16px}
+#workspace .card .task-title{-webkit-line-clamp:1;font-size:12px;line-height:16px}
+#workspace .card-metadata{grid-column:1;grid-row:2;align-items:center;gap:4px 6px;margin:0;font-size:10px;min-width:0}
+#workspace .card-bottom{grid-column:2;grid-row:2;justify-content:flex-end;flex-wrap:wrap;gap:4px;margin:0;min-width:0;max-width:150px}
+#workspace .card .card-identities{min-height:16px;gap:3px;flex-shrink:0}
+#workspace .card .user-avatar{width:16px;height:16px;font-size:7px}
+#workspace .card-assignee-name{max-width:60px;font-size:10px}
+#workspace .card .task-tags{flex-wrap:wrap;max-width:90px}
+#workspace .card .task-tag{font-size:9px;line-height:12px;padding:0 4px;flex-shrink:0;max-width:75px}
+@media(max-width:1100px) and (min-width:761px){#workspace>.filter-bar{flex-wrap:nowrap}#workspace .search-wrap{width:220px}#workspace #assignee-filter{max-width:180px}}
+@media(max-width:760px){
+#workspace{grid-template-columns:minmax(0,1fr)}#workspace>.tag-filter-panel{max-width:none}#workspace>.toolbar{padding:6px 8px}#workspace .board{grid-auto-columns:min(320px,88vw)}#workspace>.filter-bar{gap:5px}#workspace .search-wrap{margin:0}#workspace .card-bottom{max-width:135px}#workspace .card-assignee-name{max-width:50px}
+}

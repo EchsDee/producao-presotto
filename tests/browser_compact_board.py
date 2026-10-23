@@ -13,12 +13,13 @@ def main():
     fixture.setUp()
     server = None
     try:
+        tags = [fixture.request('POST', '/api/tags', {'name': name}).json['tag']['id'] for name in ('Corte', 'Urgente')]
         for index in range(32):
             board = fixture.board()
             response = fixture.request('POST', '/api/boards/' + fixture.board_id + '/tasks', {
                 'version': board['version'], 'column_id': board['columns'][0]['id'],
                 'title': 'Compact task ' + str(index), 'description': 'Full detail stays in the dialog',
-                'order_number': '000AB-' + str(index), 'desired_delivery': '2025-01-01',
+                'order_number': '000AB-' + str(index), 'desired_delivery': '2025-01-01', 'tag_ids': tags,
                 'assignees': [fixture.admin['id']]})
             assert response.status_code == 201, response.json
         server = make_server('127.0.0.1', 0, fixture.app, threaded=True)
@@ -39,6 +40,20 @@ def main():
             assert page.locator('.column-tasks').first.evaluate('(node) => node.scrollHeight > node.clientHeight')
             assert page.locator('.board').evaluate('(node) => node.getBoundingClientRect().bottom <= innerHeight')
             expect(page.locator('.column').first.locator('.add')).to_be_in_viewport()
+            # Measure fully visible cards at common desktop/laptop resolutions.
+            for width, height in ((1440, 900), (1366, 768)):
+                page.set_viewport_size({'width': width, 'height': height})
+                page.wait_for_function("() => Math.abs(parseFloat(document.querySelector('.board').style.getPropertyValue('--board-height')) - (innerHeight - document.querySelector('.board').getBoundingClientRect().top - 20)) < 2")
+                metrics = page.locator('.column-tasks').first.evaluate("""(list) => {
+                    const bounds = list.getBoundingClientRect();
+                    return {visible: [...list.querySelectorAll('.card')].filter(card => {
+                        const box = card.getBoundingClientRect();
+                        return box.top >= bounds.top && box.bottom <= bounds.bottom;
+                    }).length, height: bounds.height, cardHeight: list.querySelector('.card').getBoundingClientRect().height};
+                }""")
+                print(str(width) + 'x' + str(height) + ': ' + str(metrics))
+                assert metrics['visible'] >= 10, metrics
+            page.set_viewport_size({'width': 1440, 'height': 900})
             page.locator('#search').fill('#12')
             expect(page.locator('.card')).to_have_count(1)
             expect(page.locator('.card .task-number')).to_have_text('#12')
