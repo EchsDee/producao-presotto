@@ -516,8 +516,8 @@ function render() {
       if (task.desired_delivery) {
         const date = el('time', 'task-due', formatDelivery(task.desired_delivery, true));
         date.dateTime = task.desired_delivery; date.title = 'Entrega desejada: ' + formatDelivery(task.desired_delivery);
-        const today = new Date(); today.setHours(0,0,0,0);
-        date.classList.toggle('overdue', !done.has(task.column_id) && new Date(task.desired_delivery.includes('T') ? task.desired_delivery : task.desired_delivery + 'T00:00:00') < (task.desired_delivery.includes('T') ? new Date() : today));
+        date.classList.toggle('overdue', deliveryIsOverdue(task.desired_delivery, done.has(task.column_id)));
+        card.classList.toggle('overdue', date.classList.contains('overdue'));
         metadata.append(date);
       }
       if (metadata.children.length) card.append(metadata);
@@ -565,8 +565,8 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   $('#form-title').textContent = task ? "Detalhes da tarefa" : "Nova tarefa";
   $('#title').value = task?.title || ''; $('#description').value = task?.description || '';
   const today = new Date();
-  $('#task-date').value = task ? task.task_date || '' : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
-  $('#desired-delivery').value = task?.desired_delivery?.split('T')[0] || '';
+  $('#task-date').value = displayTaskDate(task ? task.task_date : [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-'));
+  $('#desired-delivery').value = displayTaskDate(task?.desired_delivery?.split('T')[0]);
   $('#desired-delivery-time').value = task?.desired_delivery?.split('T')[1] || '';
   $('#order-number').value = task?.order_number || '';
   $('#task-number').textContent = task ? '#' + taskReference(task) : '';
@@ -589,7 +589,7 @@ async function openTask(task = null, status = board.columns.find(c => c.type ===
   else if (can('view_task_history')) $('#task-history').append(el('p', 'field-hint', "Salve a tarefa para iniciar seu histórico."));
 }
 function taskFields() {
-  const data = {order_number: $('#order-number').value.trim(), title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: $('#task-date').value || null, desired_delivery: $('#desired-delivery').value ? $('#desired-delivery').value + ($('#desired-delivery-time').value ? 'T' + $('#desired-delivery-time').value : '') : null};
+  const data = {order_number: $('#order-number').value.trim(), title: $('#title').value.trim(), description: $('#description').value, priority: board?.tasks.find(task => task.id === editing)?.priority || 'normal', task_date: storedTaskDate($('#task-date').value), desired_delivery: $('#desired-delivery').value ? storedTaskDate($('#desired-delivery').value) + ($('#desired-delivery-time').value ? 'T' + $('#desired-delivery-time').value : '') : null};
   if(!editing && can('view_tags'))data.tag_ids=[...selectedTaskTags];
   if (!editing && (can('assign_users') || can('assign_self'))) {
     data.assignees = can('view_task_assignees')
@@ -1303,3 +1303,54 @@ $('#desired-delivery').addEventListener('input', () => {
   if (!$('#desired-delivery').value) $('#desired-delivery-time').value = '';
   $('#desired-delivery-time').disabled = $('#desired-delivery').disabled || !$('#desired-delivery').value;
 });
+
+function displayTaskDate(value) {
+  return value ? value.split('-').reverse().join('/') : '';
+}
+function storedTaskDate(value) {
+  if (!value) return null;
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(value)) throw new Error('Informe a data no formato DD/MM/AAAA.');
+  const [day, month, year] = value.split('/');
+  const iso = year + '-' + month + '-' + day;
+  const date = new Date(iso + 'T00:00:00');
+  if (Number.isNaN(date.getTime()) || date.getFullYear() !== Number(year) || date.getMonth() + 1 !== Number(month) || date.getDate() !== Number(day))
+    throw new Error('Informe uma data valida no formato DD/MM/AAAA.');
+  return iso;
+}
+
+for (const button of document.querySelectorAll('[data-date-for]')) {
+  const text = document.getElementById(button.dataset.dateFor);
+  const picker = button.parentElement.querySelector('.date-picker-native');
+  button.onclick = () => {
+    if (text.disabled) return;
+    try { picker.value = storedTaskDate(text.value) || ''; } catch { picker.value = ''; }
+    picker.showPicker();
+  };
+  picker.onchange = () => {
+    if (text.disabled) return;
+    text.value = displayTaskDate(picker.value);
+    text.dispatchEvent(new Event('input', {bubbles:true}));
+    text.dispatchEvent(new Event('change', {bubbles:true}));
+  };
+}
+
+function deliveryIsOverdue(value, completed = false, now = new Date()) {
+  if (!value || completed) return false;
+  const timed = value.includes('T');
+  const deadline = new Date(timed ? value : value + 'T00:00:00');
+  const comparison = new Date(now);
+  if (!timed) comparison.setHours(0,0,0,0);
+  return deadline < comparison;
+}
+function refreshOverdueCards() {
+  if (document.hidden) return;
+  for (const date of document.querySelectorAll('.card .task-due')) {
+    const card = date.closest('.card');
+    const overdue = deliveryIsOverdue(date.dateTime, card.closest('.column').dataset.type === 'done');
+    card.classList.toggle('overdue', overdue);
+    date.classList.toggle('overdue', overdue);
+  }
+}
+setInterval(refreshOverdueCards, 15000);
+window.addEventListener('focus', refreshOverdueCards);
+document.addEventListener('visibilitychange', refreshOverdueCards);

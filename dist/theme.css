@@ -90,3 +90,36 @@ body:has(#workspace:not([hidden])) .app{padding-top:10px;padding-bottom:10px}
 @media(max-width:760px){
 #workspace{grid-template-columns:minmax(0,1fr)}#workspace>.tag-filter-panel{max-width:none}#workspace>.toolbar{padding:6px 8px}#workspace .board{grid-auto-columns:min(320px,88vw)}#workspace>.filter-bar{gap:5px}#workspace .search-wrap{margin:0}#workspace .card-bottom{max-width:135px}#workspace .card-assignee-name{max-width:50px}
 }
+
+/* Laptop layouts must also fit reduced CSS viewports caused by display scaling. */
+#workspace,#workspace>*{min-width:0}
+#workspace .board{width:100%;min-width:0}
+#workspace .board-heading{min-width:0;flex-wrap:wrap}
+#workspace .board-heading>div{min-width:0;max-width:100%}
+#workspace #board-select{min-width:0;width:200px;max-width:100%;text-overflow:ellipsis}
+#workspace .board-actions{min-width:0;flex-wrap:wrap}
+#workspace .column-head>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#workspace .card-bottom{max-width:145px}
+#workspace .card .task-tags{min-width:0}
+#workspace .card .task-tag{overflow:hidden;text-overflow:ellipsis}
+@media(min-width:761px) and (max-width:1400px){
+.topbar-inner{padding-left:20px;padding-right:20px;gap:12px}.brand{gap:12px}.brand img{width:145px}.brand-caption{display:none}.account{gap:3px}.profile-chip{padding-right:8px;margin-right:0}.profile-copy{max-width:130px;overflow:hidden}.topbar .secondary{padding:6px 8px;font-size:11px}
+.app{padding-left:16px;padding-right:16px}
+#workspace>.toolbar{padding:6px 9px;gap:6px 10px}#workspace .board-heading{gap:8px}#workspace #summary{padding-left:8px;font-size:10px}#workspace .board-actions{gap:4px}#workspace .board-actions button{padding:6px 8px;font-size:11px}
+#workspace .filter-bar{flex-wrap:wrap;gap:6px}#workspace .search-wrap{width:210px;flex:1;min-width:140px}#workspace #assignee-filter{max-width:190px;min-width:0}#workspace #my-tasks{padding:8px 10px}
+}
+@media(min-width:761px) and (max-width:1120px){
+#workspace .board-heading{width:100%;justify-content:space-between}#workspace .board-actions{width:100%}#workspace>.tag-filter-panel{max-width:220px}#workspace .board{grid-auto-columns:310px}
+}
+@media(max-height:700px) and (min-width:761px){
+body:has(#workspace:not([hidden])) .topbar-inner{min-height:48px;padding-top:4px;padding-bottom:4px}body:has(#workspace:not([hidden])) .app{padding-top:6px;padding-bottom:6px}#workspace{gap:6px 8px}#workspace>.toolbar{min-height:44px}#workspace>.tag-filter-panel{padding:6px 8px}#workspace .column-head{min-height:30px}#workspace .column>.add{padding:4px;margin-top:3px}#notice:not(:empty){padding:6px 10px;margin-bottom:6px}
+}
+
+.task-date-fields{align-items:start}.delivery-fields{min-width:0;margin:18px 0 0;padding:0;border:0}.delivery-fields legend{padding:0;margin-bottom:7px;font-size:12px;font-weight:600;color:#5d607b}.delivery-inputs{display:grid;grid-template-columns:minmax(0,1fr) minmax(100px,.7fr);gap:8px}.delivery-inputs label{margin:0;font-size:10px;font-weight:400}.delivery-inputs input{display:block;margin-top:3px;padding-left:8px;padding-right:8px}@media(max-width:480px){.task-date-fields{grid-template-columns:minmax(0,1fr)}.delivery-fields{margin-top:4px}}
+
+/* Align task date with the delivery date/time input row. */
+.task-date-fields{align-items:end}.task-date-fields>label{margin-bottom:0}.delivery-fields{margin-bottom:0}.delivery-inputs input{height:46px}.task-date-fields>label>input{display:block;height:46px}.delivery-inputs label{display:block}
+
+.date-input-shell{display:block;position:relative;margin-top:3px}.date-input-shell>input[type=text]{display:block;width:100%;height:46px;margin-top:0;padding-right:34px}.date-picker-button{position:absolute;right:5px;top:50%;transform:translateY(-50%);border:0;background:transparent;padding:4px;font-size:14px}.date-input-shell>.date-picker-native{position:absolute;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none;bottom:0;left:0}
+
+#workspace .card.overdue,#workspace .card.overdue:hover{border-color:var(--danger)}#workspace .card.overdue .task-number,#workspace .card.overdue .task-order,#workspace .card.overdue .task-due{color:var(--danger)}
