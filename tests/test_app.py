@@ -221,6 +221,14 @@ class KanbanTests(unittest.TestCase):
         self.assertEqual(client.get('/api/me').status_code, 401)
         self.assertEqual(client.post('/api/login', json={'username': 'other', 'password': 'reset-password-123'}).status_code, 401)
 
+    def test_task_creation_is_not_blocked_by_other_board_changes(self):
+        board = self.board()
+        self.task()
+        result = self.request('POST', f'/api/boards/{self.board_id}/tasks', {
+            'version': board['version'], 'column_id': board['columns'][0]['id'], 'title': 'Created concurrently'})
+        self.assertEqual(result.status_code, 201, result.json)
+        self.assertEqual(len(result.json['board']['tasks']), 2)
+
     def test_stale_writes_do_not_overwrite_and_transactions_rollback(self):
         board = self.board()
         data = {'version': board['version'], 'name': 'New column', 'type': 'doing'}

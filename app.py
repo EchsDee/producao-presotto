@@ -1121,7 +1121,8 @@ def create_app(config=None):
     def create_task(board_id):
         need('create_tasks')
         data = body()
-        board_write(board_id, data)
+        # Creation cannot overwrite anyone's work, so it does not require the current board version.
+        lookup('boards', board_id)
         column_id = data.get('column_id')
         column_for(board_id, column_id)
         title, description, priority = task_values(data)
